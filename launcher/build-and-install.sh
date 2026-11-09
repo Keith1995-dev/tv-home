@@ -13,13 +13,14 @@ JAR="$SDK/platforms/android-34/android.jar"
 STOCK_LAUNCHER="${STOCK_LAUNCHER:-com.google.android.apps.tv.launcherx}"
 B=build
 
+[ -f res/values/secrets.xml ] || { cp secrets.example.xml res/values/secrets.xml; echo "Created res/values/secrets.xml; add your keys there."; }
 rm -rf "$B" && mkdir -p "$B/gen" "$B/classes" "$B/dex"
 "$BT/aapt2" compile --dir res -o "$B/res.zip"
 "$BT/aapt2" link -o "$B/base.apk" -I "$JAR" --manifest AndroidManifest.xml --java "$B/gen" \
-  -A assets --min-sdk-version 30 --target-sdk-version 30 "$B/res.zip"
+  -A assets --min-sdk-version "${MIN_SDK:-30}" --target-sdk-version "${MIN_SDK:-30}" "$B/res.zip"
 javac -nowarn -Xlint:-options --release 11 -classpath "$JAR" -d "$B/classes" \
   $(find src "$B/gen" -name '*.java')
-"$BT/d8" --min-api 30 --lib "$JAR" --output "$B/dex" $(find "$B/classes" -name '*.class')
+"$BT/d8" --min-api "${MIN_SDK:-30}" --lib "$JAR" --output "$B/dex" $(find "$B/classes" -name '*.class')
 cp "$B/base.apk" "$B/unsigned.apk"
 (cd "$B/dex" && zip -q -u ../unsigned.apk classes.dex)
 "$BT/zipalign" -f 4 "$B/unsigned.apk" "$B/aligned.apk"

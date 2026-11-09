@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain HTTP stays allowed for the Mac on the LAN (Update button, phone remote feed).
+  Apple's aerial video server chains to "Apple Root CA", which Android doesn't ship; trust it for that host only.
+  res/raw/apple_root_ca.pem was copied from macOS's system roots (SHA-256 B0:B1:73:0E:...:10:01:F0:24).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">sylvan.apple.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/apple_root_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

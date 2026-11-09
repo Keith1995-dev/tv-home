@@ -3,6 +3,8 @@ tools/venv/
 tools/adbkey/
 tools/.tv_host
 launcher/debug.keystore
+launcher/res/values/secrets.xml
+HANDOFF.md
 backup/
 shots/
 
@@ -10,3 +12,4 @@ shots/
 launcher/build/
 .DS_Store
 __pycache__/
+tools/remote/state/

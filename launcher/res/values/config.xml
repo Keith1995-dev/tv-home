@@ -2,15 +2,17 @@
 <!--
   Launcher settings. Edit, then run launcher/build-and-install.sh.
   Package names: tools/venv/bin/python -I tools/tv.py 'pm list packages'
+  One APK serves both TVs (old Android 8 set and the Hisense), so lists cover both; missing apps are skipped.
 -->
 <resources>
     <!-- Dock apps, left to right. Apps that aren't installed are skipped. -->
     <string-array name="dock_apps">
         <item>com.apple.atve.androidtv.appletv</item>
-        <item>com.google.android.youtube.tv</item>
-        <item>in.startv.hotstar</item>
+        <item>com.stremio.one</item>
         <item>com.netflix.ninja</item>
         <item>com.amazon.amazonvideo.livingroom</item>
+        <item>com.google.android.youtube.tv</item>
+        <item>in.startv.hotstar</item>
     </string-array>
 
     <!-- Never shown as tiles: system helpers, and the Live TV app (it's in the Inputs menu). -->
@@ -19,16 +21,68 @@
         <item>com.tcl.suspension</item>
         <item>com.tcl.t_solo</item>
         <item>com.tcl.dashboard</item>
+        <item>com.vt.tv.tvcenter</item>
+        <item>com.vt.tv.protector</item>
+        <item>com.vt.tv.singlelisten</item>
+        <item>com.vt.tv.ai_sense</item>
+        <item>com.vt.tv.mobiledeviceconnectiontips</item>
+        <item>com.google.android.play.games</item>
     </string-array>
 
-    <!-- The TV's Live TV / tuner app, listed last in the Inputs menu. Empty to leave it out.
-         Common ones: com.tcl.tv (TCL), com.mediatek.wwtv.tvcenter (Xiaomi, many MediaTek sets),
-         com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
-    <string name="live_tv_package" translatable="false">com.tcl.tv</string>
+    <!-- The TV's Live TV / tuner app, listed last in the Inputs menu; the first installed one wins.
+         Common ones: com.tcl.tv (TCL), com.vt.tv.tvcenter (Hisense), com.mediatek.wwtv.tvcenter (Xiaomi,
+         many MediaTek sets), com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
+    <string-array name="live_tv_packages">
+        <item>com.tcl.tv</item>
+        <item>com.vt.tv.tvcenter</item>
+    </string-array>
 
     <!-- The manufacturer's own source picker, used if switching to an input directly fails. -->
-    <string name="input_picker_package" translatable="false">com.tcl.suspension</string>
+    <string-array name="input_picker_packages">
+        <item>com.tcl.suspension</item>
+        <item>com.vt.tv.tvcenter</item>
+    </string-array>
 
-    <!-- Tiles per row in the grid. -->
-    <integer name="columns">5</integer>
+    <!-- Your keys, home city and your computer's addresses (Update button, phone remote) live in
+         res/values/secrets.xml, which stays on your machine. The build creates it from launcher/secrets.example.xml. -->
+
+    <!-- Model used for the OTT picks and top 10s (needs web search support). -->
+    <string name="claude_model" translatable="false">claude-sonnet-5-5</string>
+
+    <!-- Unit the forecast is fetched in; the screen always shows °C first with °F beside it. -->
+    <string name="temperature_unit" translatable="false">celsius</string>
+    <!-- Tennis rain check covers these hours (24h clock): 17 to 21 is 5 PM to 9 PM. -->
+    <integer name="tennis_start_hour">17</integer>
+    <integer name="tennis_end_hour">21</integer>
+
+    <!-- Team ticker from ESPN's public feed: league path, ESPN team code, badge text. -->
+    <string name="team_league" translatable="false">basketball/nba</string>
+    <string name="team_id" translatable="false">gs</string>
+    <string name="team_badge" translatable="false">GSW</string>
+
+    <!-- Minutes without a button press before everything fades out, leaving only the aerial video. 0 = never. -->
+    <integer name="idle_minutes">2</integer>
+
+    <!-- Bedtime: from this hour until wake_hour the screen dims, idle mode shows a big clock, and after
+         sleep_after_minutes of that the TV goes to standby (0 = never). Same hours = bedtime off. -->
+    <integer name="bedtime_hour">23</integer>
+    <integer name="wake_hour">6</integer>
+    <integer name="sleep_after_minutes">30</integer>
+
+    <!-- Apple TV aerial videos as the background (Android 11+ only; older TVs keep the photos).
+         Landscapes, cities, space and underwater; the list is res/values/aerials.xml (tools/gen-backgrounds.py). -->
+    <bool name="aerials">true</bool>
+
+    <!-- Between aerial clips: a few stills with a slow zoom and a caption. Remove a line to turn that kind off.
+         art = public-domain paintings (Art Institute of Chicago), earth = Google Earth View satellite photos,
+         space = Hubble and Webb images (NASA). -->
+    <string-array name="background_stills">
+        <item>art</item>
+        <item>earth</item>
+        <item>space</item>
+    </string-array>
+    <!-- Stills shown after each clip (0 = aerials only), and seconds per still. -->
+    <integer name="stills_per_break">3</integer>
+    <integer name="still_seconds">40</integer>
+
 </resources>

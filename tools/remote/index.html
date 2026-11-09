@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>TV Remote</title>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #181a21; --panel2: #20232c; --text: #f2f3f7; --muted: #8b90a0;
+    --accent: #7cc4ff; --ok: #5ddc9a; --bad: #ff7b7b; --radius: 18px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+  body { padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 16px); max-width: 480px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 10px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .chip { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--panel2); color: var(--muted); }
+  .chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 14px; }
+  .tabs button { padding: 11px; border: 0; border-radius: 12px; background: var(--panel); color: var(--muted); font-size: 15px; font-weight: 600; }
+  .tabs button.on { background: var(--panel2); color: var(--text); }
+  .card { background: var(--panel); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  button { font: inherit; color: var(--text); }
+  .dpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 280px; margin: 0 auto; }
+  .dpad button { aspect-ratio: 1; border: 0; border-radius: 50%; background: var(--panel2); font-size: 24px; }
+  .dpad button.ok { background: var(--accent); color: #07121c; font-weight: 700; font-size: 17px; }
+  .dpad .sp { visibility: hidden; }
+  button:active { transform: scale(.94); filter: brightness(1.2); }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .row.three { grid-template-columns: repeat(3, 1fr); }
+  .row button, .apps button { border: 0; border-radius: 14px; background: var(--panel2); padding: 14px 4px; font-size: 14px; }
+  .apps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .apps button { text-align: left; padding: 14px; font-weight: 600; }
+  .power { background: #3a1d22 !important; color: var(--bad); }
+  input, textarea { width: 100%; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid #2c303b; border-radius: 12px; padding: 12px; }
+  .inline { display: flex; gap: 8px; }
+  .inline button { border: 0; border-radius: 12px; padding: 0 16px; background: var(--accent); color: #07121c; font-weight: 700; }
+  .inline button.alt { background: var(--panel2); color: var(--text); }
+  #log { display: flex; flex-direction: column; gap: 10px; max-height: 46vh; overflow-y: auto; margin-bottom: 12px; }
+  .msg { padding: 10px 14px; border-radius: 16px; max-width: 90%; white-space: pre-wrap; }
+  .me { align-self: flex-end; background: var(--accent); color: #07121c; }
+  .ai { align-self: flex-start; background: var(--panel2); }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  label.chk { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; margin-top: 10px; }
+  .hidden { display: none !important; }
+  .err { color: var(--bad); font-size: 14px; margin-top: 8px; min-height: 1em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📺 TV Remote</h1>
+  <span id="state" class="chip">connecting…</span>
+</header>
+
+<div id="gate" class="card hidden">
+  <h2>Enter PIN</h2>
+  <div class="inline"><input id="pin" inputmode="numeric" maxlength="8" placeholder="PIN shown on your Mac"><button id="pinGo">Go</button></div>
+  <div id="pinErr" class="err"></div>
+</div>
+
+<div id="app" class="hidden">
+  <div id="pairCard" class="card hidden">
+    <h2>Pair with your TV</h2>
+    <p class="hint" style="margin-top:0">1. Tap Start. A code appears on the TV.<br>2. Type that code here.</p>
+    <div class="inline" style="margin-bottom:10px"><button id="pairStart" style="padding:12px 16px">Start</button></div>
+    <div class="inline"><input id="pairCode" maxlength="8" placeholder="Code on TV" autocapitalize="characters"><button id="pairGo">Pair</button></div>
+    <div id="pairErr" class="err"></div>
+  </div>
+
+  <div class="tabs">
+    <button id="tabRemote" class="on">Remote</button>
+    <button id="tabAsk">Ask Claude</button>
+  </div>
+
+  <section id="remote">
+    <div class="card">
+      <div class="dpad">
+        <span class="sp"></span><button data-k="DPAD_UP">▲</button><span class="sp"></span>
+        <button data-k="DPAD_LEFT">◀</button><button class="ok" data-k="DPAD_CENTER">OK</button><button data-k="DPAD_RIGHT">▶</button>
+        <span class="sp"></span><button data-k="DPAD_DOWN">▼</button><span class="sp"></span>
+      </div>
+      <div class="row three" style="margin-top:16px">
+        <button data-k="BACK">← Back</button><button data-k="HOME">⌂ Home</button><button data-k="MENU">☰ Menu</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <button data-k="VOLUME_DOWN">🔉 −</button><button data-k="VOLUME_UP">🔊 +</button>
+        <button data-k="MUTE">🔇</button><button data-k="POWER" class="power">⏻</button>
+      </div>
+      <div class="row three" style="margin-top:10px">
+        <button data-k="MEDIA_PREVIOUS">⏮</button><button data-k="MEDIA_PLAY_PAUSE">⏯</button><button data-k="MEDIA_NEXT">⏭</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Apps</h2>
+      <div class="apps">
+        <button data-a="youtube">▶ YouTube</button><button data-a="netflix">N Netflix</button>
+        <button data-a="hotstar">✦ JioHotstar</button><button data-a="prime video">▷ Prime Video</button>
+        <button data-a="apple tv">  Apple TV</button><button data-a="settings">⚙ Settings</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Type on TV</h2>
+      <div class="inline"><input id="tvText" placeholder="Text for the TV search box"><button id="tvSend">Send</button></div>
+      <div class="hint">Tap the search box on the TV first, then send. Tip: use your keyboard's 🎤 to dictate.</div>
+    </div>
+  </section>
+
+  <section id="ask" class="hidden">
+    <div class="card">
+      <div id="log"><div class="msg ai">Hi! Ask me anything, or tell me to do something on the TV, like “open YouTube” or “turn the volume up”. Tap the 🎤 on your keyboard to talk.</div></div>
+      <div class="inline"><textarea id="q" rows="2" placeholder="Type or dictate…"></textarea><button id="send">Ask</button></div>
+      <label class="chk"><input type="checkbox" id="showTv" checked style="width:auto"> Also show the answer on the TV</label>
+      <div id="askErr" class="err"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let PIN = localStorage.getItem('tvpin') || '';
+
+async function api(path, body) {
+  const r = await fetch('/api/' + path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'X-Pin': PIN, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { showGate('Wrong PIN'); throw new Error('pin'); }
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function showGate(msg) { $('gate').classList.remove('hidden'); $('app').classList.add('hidden'); $('pinErr').textContent = msg || ''; }
+function buzz() { if (navigator.vibrate) navigator.vibrate(12); }
+
+async function refresh() {
+  try {
+    const s = await api('status');
+    $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
+    const el = $('state');
+    const map = { connected: ['Connected', 'ok'], needs_pairing: ['Needs pairing', 'bad'], tv_unreachable: ['TV not reachable', 'bad'], starting: ['Connecting…', ''] };
+    const [t, c] = map[s.state] || [s.state, ''];
+    el.textContent = t; el.className = 'chip ' + c;
+    $('pairCard').classList.toggle('hidden', s.state !== 'needs_pairing');
+  } catch (e) { if (e.message !== 'pin') { $('state').textContent = 'Mac not reachable'; $('state').className = 'chip bad'; } }
+}
+
+$('pinGo').onclick = () => { PIN = $('pin').value.trim(); localStorage.setItem('tvpin', PIN); refresh(); };
+$('tabRemote').onclick = () => tab('remote');
+$('tabAsk').onclick = () => tab('ask');
+function tab(w) {
+  $('remote').classList.toggle('hidden', w !== 'remote'); $('ask').classList.toggle('hidden', w !== 'ask');
+  $('tabRemote').classList.toggle('on', w === 'remote'); $('tabAsk').classList.toggle('on', w === 'ask');
+}
+
+document.querySelectorAll('[data-k]').forEach((b) => b.onclick = async () => {
+  buzz(); try { await api('key', { key: b.dataset.k }); } catch (e) { $('state').textContent = e.message; refresh(); }
+});
+document.querySelectorAll('[data-a]').forEach((b) => b.onclick = async () => {
+  buzz(); try { await api('app', { app: b.dataset.a }); } catch (e) { refresh(); }
+});
+$('tvSend').onclick = async () => {
+  const t = $('tvText').value; if (!t) return;
+  try { await api('text', { text: t }); $('tvText').value = ''; } catch (e) { refresh(); }
+};
+
+$('pairStart').onclick = async () => {
+  $('pairErr').textContent = '';
+  try { await api('pair/start', {}); $('pairErr').textContent = 'Code is on the TV now — type it below.'; $('pairErr').style.color = 'var(--ok)'; }
+  catch (e) { $('pairErr').style.color = ''; $('pairErr').textContent = e.message; }
+};
+$('pairGo').onclick = async () => {
+  $('pairErr').style.color = ''; $('pairErr').textContent = '';
+  try { await api('pair/finish', { code: $('pairCode').value.trim() }); refresh(); }
+  catch (e) { $('pairErr').textContent = e.message; }
+};
+
+function add(cls, text) {
+  const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text;
+  $('log').appendChild(d); $('log').scrollTop = 1e9; return d;
+}
+async function ask() {
+  const q = $('q').value.trim(); if (!q) return;
+  $('q').value = ''; $('askErr').textContent = '';
+  add('me', q); const wait = add('ai', '…'); $('send').disabled = true;
+  try {
+    const r = await api('chat', { message: q, show_on_tv: $('showTv').checked });
+    wait.textContent = r.reply;
+  } catch (e) { wait.remove(); $('askErr').textContent = e.message; }
+  $('send').disabled = false;
+}
+$('send').onclick = ask;
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } });
+
+if (PIN) refresh(); else showGate('');
+setInterval(() => { if (!document.hidden && PIN) refresh(); }, 15000);
+</script>
+</body>
+</html>

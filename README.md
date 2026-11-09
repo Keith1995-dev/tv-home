@@ -1,8 +1,12 @@
 # tv-home
 
 **Make a slow, ad-filled Android TV fast and clean again.** Debloat it over Wi-Fi and give it a
-tiny Apple TV-style home screen with rotating nature wallpapers. You can hand the whole thing to
+tiny Apple TV-style home screen with Apple aerial videos, your calendar and deliveries, a
+continue-watching strip and Claude-picked things to watch. You can hand the whole thing to
 Claude Code with one prompt, or do it by hand with the scripts here.
+
+Built on [mihirgupta0900/tv-home](https://github.com/mihirgupta0900/tv-home), which did the
+debloat tooling and the first launcher.
 
 ![Before: Google TV home with a sponsored hero. After: clean dock over a Lake Louise wallpaper](before-after.png)
 
@@ -49,8 +53,12 @@ Undo everything with `tools/restore.sh <the same list>`.
 | Path | What it is |
 |---|---|
 | [PROMPT.md](PROMPT.md) | The prompt for Claude Code / any coding agent |
-| [launcher/](launcher/) | The home screen. 4.7 MB including the wallpapers; plain Android, no network, no background services |
-| [launcher/res/values/config.xml](launcher/res/values/config.xml) | Dock apps, hidden apps, Live TV app, grid columns |
+| [launcher/](launcher/) | The home screen. Plain Android, no Gradle, no background services |
+| [launcher/res/values/config.xml](launcher/res/values/config.xml) | Dock apps, hidden apps, Live TV app, team, backgrounds, bedtime hours |
+| [launcher/secrets.example.xml](launcher/secrets.example.xml) | Template for your keys and home city; the build copies it to `res/values/secrets.xml`, which git ignores |
+| [tools/personal/](tools/personal/) | Google Apps Script that turns your Gmail and Calendar into the Personal view |
+| [tools/gen-backgrounds.py](tools/gen-backgrounds.py) | Regenerates the aerial video and still image lists |
+| [tools/remote.sh](tools/remote.sh), [tools/update-server.sh](tools/update-server.sh) | Phone remote, and a server for the launcher's Update button |
 | [tools/tv.py](tools/tv.py) | Pure-Python ADB client: shell, batch, screenshots, chunked APK push |
 | [tools/find-tv.sh](tools/find-tv.sh) | Finds Android TVs on your Wi-Fi |
 | [tools/type.sh](tools/type.sh) | Type into the TV's on-screen keyboard from your laptop (`tools/type.sh` alone prompts hidden, for passwords) |
@@ -59,15 +67,22 @@ Undo everything with `tools/restore.sh <the same list>`.
 
 ## The launcher
 
-- Clock, greeting and date top-left. Frosted pills top-right for **Inputs** (HDMI/AV/Live TV
-  dropdown; the remote's Menu key opens it too), **Wi-Fi** (shows the network name) and **Settings**.
-- A dock of your favourite apps. The focused app's name appears above it over a glow coloured from
-  its banner. Press Down for every other app in a grid.
-- 12 nature photos crossfade every 10 minutes, with a scrim so text stays readable. Swap them in
-  `launcher/assets/wallpapers/` (1920×1080 JPEGs, credits in `launcher/WALLPAPER-CREDITS.md`).
-- Deterministic D-pad focus, remembers the last tile, picks up newly installed apps on return.
+- Clock, greeting and date top-left; small icon buttons top-right for **Inputs**, **Wi-Fi** and
+  **Settings**. Weather in °C with °F beside it, world clocks and your team's next game.
+- **Entertainment / Personal / Work** tabs. Personal shows your calendar with flights, deliveries
+  and bill due dates mixed in, plus Packages and Needs Attention cards
+  ([setup](tools/personal/README.md)).
+- A dock of your favourite apps with an **All Apps** drawer (recents first; add or remove dock apps
+  from it). Hovering Stremio or YouTube opens a small continue-watching strip above the dock.
+- **Discover**: Claude's picks and top 10s for your streaming apps. Mark titles as seen, refresh,
+  or press **Ask** and say "new Malayalam movies this year"; each pick opens in Stremio.
+- **Backgrounds**: Apple TV aerial videos (landscapes, cities, space, underwater), with paintings,
+  Google Earth View and NASA images between clips. Older TVs get the bundled nature photos.
+- Small touches: a fact line that changes every 5 minutes, a morning briefing, a live-game alert,
+  and bedtime mode after 11 PM (dimmed screen, big clock, sleep timer).
 
-Change the dock: edit `config.xml`, then run `launcher/build-and-install.sh`.
+Change the dock or features: edit `config.xml`, then run `launcher/build-and-install.sh`. Features
+that need a key (Claude, Personal, Stremio) stay off until you add it to `res/values/secrets.xml`.
 
 ## Gotchas we hit
 
@@ -90,10 +105,11 @@ Change the dock: edit `config.xml`, then run `launcher/build-and-install.sh`.
 
 Android TV and Google TV: TCL, Xiaomi/Redmi, Hisense, Sony, OnePlus, Realme, Nvidia Shield,
 Chromecast with Google TV and most others. Not Samsung (Tizen), LG (webOS) or Fire TV.
-Tested on: TCL Google TV (Android 11). Add yours to `examples/`.
+Tested on: TCL Google TV (Android 11), Hisense Android TV (Android 12). Add yours to `examples/`.
 
 ## Credits
 
-Inspired by [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack). Wallpaper photos are
+Started from [mihirgupta0900/tv-home](https://github.com/mihirgupta0900/tv-home) by Mihir Gupta,
+extended by Keith Percy. Inspired by [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack). Wallpaper photos are
 from Wikimedia Commons under their own licences, see
 [launcher/WALLPAPER-CREDITS.md](launcher/WALLPAPER-CREDITS.md). Code is MIT, see [LICENSE](LICENSE).
