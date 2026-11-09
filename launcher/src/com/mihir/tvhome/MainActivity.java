@@ -150,6 +150,8 @@ public class MainActivity extends Activity {
         startTeam();
         startFacts();
         startWatchFeeds();
+        OverlayService.start(this);
+        OverlayService.setHomeShowing(true);
         personalPage.start();
         handler.postDelayed(maybeBriefing, 1500);
         loadRecs(false);
@@ -187,6 +189,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(maybeBriefing);
         handler.removeCallbacks(sleepNow);
         personalPage.stop();
+        OverlayService.setHomeShowing(false);
         stopAerials();
         unregisterReceiver(tick);
         if (inputsPopup != null) inputsPopup.dismiss();
@@ -204,6 +207,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         // Home pressed while already home: jump back to the first dock app.
         if (inputsPopup != null) inputsPopup.dismiss();
+        closeParty();
         closeAppsDrawer(false);
         showTab(0);
         if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
@@ -214,6 +218,7 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // Home has nowhere to go back to; Back from Personal or Work returns to Entertainment,
         // Back from the grid returns to the dock.
+        if (partyOpen) { closeParty(); return; }
         if (drawerOpen) { closeAppsDrawer(true); return; }
         if (tab != 0) { tabViews.get(0).requestFocus(); return; }
         if (scroll.getScrollY() > 0 && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
@@ -255,6 +260,7 @@ public class MainActivity extends Activity {
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xB3000000, 0x40000000, 0x26000000, 0x8C000000, 0xE6000000}));
         ui.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+        ui.addView(buildGameTint(), new FrameLayout.LayoutParams(-1, -1));
         gridShade = new View(this);
         gridShade.setBackgroundColor(0xB3000000);
         gridShade.setAlpha(0f);
@@ -1207,7 +1213,9 @@ public class MainActivity extends Activity {
             recsJump = true;
             loadRecs(true);
         });
-        for (TextView p : new TextView[]{ask, refresh}) {
+        TextView partyPill = pill("Watch party", "🍿");
+        partyPill.setOnClickListener(v -> openParty());
+        for (TextView p : new TextView[]{ask, partyPill, refresh}) {
             pills.remove(p); // pill() is shared with the top bar; these belong to Discover
             p.setOnFocusChangeListener(discoverPillFocus(p));
             head.addView(p, llp(-2, dp(PILL_H), dp(8), 0, 0, dp(2)));
@@ -1754,6 +1762,226 @@ public class MainActivity extends Activity {
                 asking = false;
             }
         }).start();
+    }
+
+    // ---------------------------------------------------------------- watch party
+
+    private static final long PARTY_LINGER_MS = 10 * 60 * 1000L; // phones keep showing the picks this long
+    private WatchParty party;
+    private String partyUrl;
+    private FrameLayout partyLayer;
+    private LinearLayout partyGuests;
+    private TextView partyPick, partyStatus;
+    private boolean partyOpen, partyPicking;
+    private int uiFocusability;
+    private final Runnable endParty = () -> { if (!partyOpen && party != null) { party.stop(); party = null; } };
+
+    /** A QR code friends scan to pick their mood; Claude then picks three films for the whole group. */
+    private void openParty() {
+        if (!hasApiKey()) { toast("Add your Claude API key in secrets.xml first"); return; }
+        if (partyOpen) return;
+        handler.removeCallbacks(endParty);
+        if (party == null) {
+            party = new WatchParty(() -> runOnUiThread(this::renderGuests));
+            partyUrl = party.start();
+            if (partyUrl == null) { party = null; toast("The TV needs to be on Wi-Fi or Ethernet for a watch party"); return; }
+        }
+        partyOpen = true;
+        buildParty();
+        renderGuests();
+        partyLayer.setAlpha(0f);
+        partyLayer.animate().alpha(1f).setDuration(350).start();
+        partyPick.requestFocus();
+        // Keep the remote inside the party card while it's open.
+        uiFocusability = ui.getDescendantFocusability();
+        ui.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+    }
+
+    private void closeParty() {
+        if (!partyOpen) return;
+        partyOpen = false;
+        ui.setDescendantFocusability(uiFocusability);
+        View layer = partyLayer;
+        layer.animate().alpha(0f).setDuration(250).withEndAction(() -> rootView.removeView(layer)).start();
+        if (partyPicking) return; // the picks will still arrive in Discover
+        handler.postDelayed(endParty, PARTY_LINGER_MS);
+        if (!recRows.isEmpty()) recRows.get(0).get(0).requestFocus();
+    }
+
+    private void buildParty() {
+        partyLayer = new FrameLayout(this);
+        partyLayer.setBackgroundColor(0xB3000000);
+        LinearLayout card = new LinearLayout(this);
+        card.setPadding(dp(28), dp(26), dp(30), dp(24));
+        liquid(card, dp(28));
+        partyLayer.addView(card, new FrameLayout.LayoutParams(dp(820), -2, Gravity.CENTER));
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        left.setGravity(Gravity.CENTER_HORIZONTAL);
+        ImageView qr = new ImageView(this);
+        qr.setImageBitmap(QrCode.bitmap(partyUrl, 8));
+        qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        qr.setClipToOutline(true);
+        qr.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(14)); }
+        });
+        left.addView(qr, new LinearLayout.LayoutParams(dp(196), dp(196)));
+        TextView scan = text(10, "sans-serif-medium", 0xE6FFFFFF);
+        scan.setText("Scan with your phone camera");
+        left.addView(scan, llp(-2, -2, 0, dp(10), 0, 0));
+        TextView link = text(8, "sans-serif", 0x80FFFFFF);
+        link.setText(partyUrl.replace("http://", "") + "  ·  same Wi-Fi");
+        left.addView(link, llp(-2, -2, 0, dp(2), 0, 0));
+        card.addView(left, new LinearLayout.LayoutParams(-2, -2));
+
+        LinearLayout right = new LinearLayout(this);
+        right.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams rp = llp(0, -2, dp(28), 0, 0, 0);
+        rp.weight = 1;
+        card.addView(right, rp);
+        TextView h = text(26, "sans-serif-light", Color.WHITE);
+        h.setText("🍿  Watch party");
+        right.addView(h);
+        TextView sub = text(11, "sans-serif", 0xB3FFFFFF);
+        sub.setText("Everyone scans the code and picks a mood. Claude finds three films the whole group will enjoy, "
+                + "leaving out ones you've ticked off.");
+        sub.setLineSpacing(0, 1.12f);
+        right.addView(sub, llp(-1, -2, 0, dp(4), 0, dp(14)));
+        TextView who = text(8, "sans-serif-medium", 0x99FFFFFF);
+        who.setText("WHO'S IN");
+        who.setLetterSpacing(0.2f);
+        right.addView(who);
+        partyGuests = new LinearLayout(this);
+        partyGuests.setOrientation(LinearLayout.VERTICAL);
+        partyGuests.setMinimumHeight(dp(92));
+        right.addView(partyGuests, llp(-1, -2, 0, dp(6), 0, dp(12)));
+        partyStatus = text(10, "sans-serif", 0xB3FFFFFF);
+        partyStatus.setVisibility(View.GONE);
+        right.addView(partyStatus, llp(-2, -2, 0, 0, 0, dp(8)));
+        LinearLayout buttons = new LinearLayout(this);
+        partyPick = pill("Pick films", "✨");
+        partyPick.setOnClickListener(v -> pickPartyFilms());
+        TextView close = pill("Close", "✕");
+        close.setOnClickListener(v -> closeParty());
+        for (TextView p : new TextView[]{partyPick, close}) {
+            pills.remove(p); // pill() is shared with the top bar; these belong to the party card
+            buttons.addView(p, llp(-2, dp(PILL_H + 4), 0, 0, dp(10), 0));
+        }
+        partyPick.setNextFocusLeftId(partyPick.getId());
+        close.setNextFocusRightId(close.getId());
+        for (View p : new View[]{partyPick, close}) { p.setNextFocusUpId(p.getId()); p.setNextFocusDownId(p.getId()); }
+        right.addView(buttons);
+        rootView.addView(partyLayer, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void renderGuests() {
+        if (!partyOpen || party == null) return;
+        partyGuests.removeAllViews();
+        List<org.json.JSONObject> gs = party.guests();
+        if (gs.isEmpty()) {
+            TextView none = text(11, "sans-serif", 0x80FFFFFF);
+            none.setText("Nobody yet. Scan the code to join.");
+            partyGuests.addView(none);
+        }
+        for (org.json.JSONObject g : gs) {
+            StringBuilder what = new StringBuilder();
+            for (String key : new String[]{"moods", "langs"}) {
+                org.json.JSONArray a = g.optJSONArray(key);
+                for (int i = 0; a != null && i < a.length(); i++) what.append(what.length() > 0 ? ",  " : "").append(a.optString(i));
+            }
+            if (!g.optString("avoid").isEmpty()) what.append(what.length() > 0 ? "  ·  " : "").append("not ").append(g.optString("avoid"));
+            TextView row = text(12, "sans-serif", 0xE6FFFFFF);
+            row.setSingleLine(true);
+            row.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.setText(android.text.Html.fromHtml("<b>" + android.text.TextUtils.htmlEncode(g.optString("name"))
+                    + "</b>&nbsp;&nbsp;<font color='#99FFFFFF'>" + android.text.TextUtils.htmlEncode(
+                    what.length() > 0 ? what.toString() : "happy with anything") + "</font>", android.text.Html.FROM_HTML_MODE_LEGACY));
+            partyGuests.addView(row, llp(-1, -2, 0, 0, 0, dp(6)));
+        }
+        if (!partyPicking) {
+            partyPick.setText("✨  Pick films" + (gs.isEmpty() ? "" : " for " + gs.size() + (gs.size() == 1 ? " person" : " people")));
+        }
+    }
+
+    private void pickPartyFilms() {
+        List<org.json.JSONObject> gs = party.guests();
+        if (gs.isEmpty()) { partyStatus.setText("Waiting for someone to scan the code"); partyStatus.setVisibility(View.VISIBLE); return; }
+        if (partyPicking) return;
+        partyPicking = true;
+        party.setPicking();
+        partyPick.setText("✨  Picking…");
+        partyStatus.setText("Claude is picking three films for the group. This takes about a minute.");
+        partyStatus.setVisibility(View.VISIBLE);
+        StringBuilder who = new StringBuilder(), names = new StringBuilder();
+        for (org.json.JSONObject g : gs) {
+            names.append(names.length() > 0 ? ", " : "").append(g.optString("name"));
+            who.append("- ").append(g.optString("name")).append(": in the mood for ")
+                    .append(list(g.optJSONArray("moods"), "anything")).append("; languages ")
+                    .append(list(g.optJSONArray("langs"), "any"));
+            if (!g.optString("avoid").isEmpty()) who.append("; not in the mood for ").append(g.optString("avoid"));
+            who.append('\n');
+        }
+        Set<String> apps = new java.util.LinkedHashSet<>();
+        for (String[] e : PLATFORM_APPS) if (isInstalled(e[1])) apps.add(labelFor(e[1]));
+        String today = new java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.ENGLISH).format(new java.util.Date());
+        String seen = seenTitles();
+        String prompt = "Today is " + today + ". We're having a watch party at home (in Florida) and want one film to "
+                + "watch together. Each guest said what they're in the mood for:\n" + who
+                + "Pick exactly 3 films (not series) the whole group will enjoy together, balancing everyone's moods "
+                + "and languages; when languages differ, prefer a shared one or a film that works well with English "
+                + "subtitles. We can watch on " + String.join(", ", apps) + ", and on Stremio, which plays anything with "
+                + "an IMDb entry. Use web search to check each film is real, well reviewed and where it streams. Reply "
+                + "with ONLY JSON, no markdown: {\"sections\":[{\"title\":\"Watch party picks\",\"items\":[3 items, "
+                + "best first]}]}. Each item: " + ITEM_SHAPE + ". Always fill imdb with the IMDb id. In note, say in "
+                + "under 70 characters why it suits this group, naming guests where it helps."
+                + (seen.isEmpty() ? "" : " We've already seen these, leave them out: " + seen + ".");
+        String title = "🍿 Watch party  →  " + names;
+        new Thread(() -> {
+            try {
+                org.json.JSONArray secs = new org.json.JSONObject(askClaude(prompt)).getJSONArray("sections");
+                org.json.JSONObject sec = secs.getJSONObject(0).put("title", title);
+                // Only real films: each needs an IMDb id (Stremio opens it), and no series or half-written entries.
+                org.json.JSONArray got = sec.getJSONArray("items"), items = new org.json.JSONArray();
+                for (int i = 0; i < got.length() && items.length() < 3; i++) {
+                    org.json.JSONObject it = got.getJSONObject(i);
+                    if (it.optString("imdb").matches("tt\\d+") && !it.optString("kind").toLowerCase(Locale.ROOT).startsWith("series")
+                            && !it.optString("note").toLowerCase(Locale.ROOT).contains("placeholder")) items.put(it);
+                }
+                if (items.length() == 0) throw new java.io.IOException("no films came back");
+                sec.put("items", items);
+                prefs().edit().putString("ask_json", new org.json.JSONArray().put(sec).toString())
+                        .putLong("ask_at", System.currentTimeMillis()).apply();
+                party.setPicks(items);
+                runOnUiThread(() -> {
+                    partyPicking = false;
+                    closeParty();
+                    handler.removeCallbacks(endParty);
+                    handler.postDelayed(endParty, PARTY_LINGER_MS);
+                    renderRecs(prefs().getString("recs_json", null), prefs().getLong("recs_at", 0));
+                    wireFocus();
+                    showDiscoverPage();
+                    if (!recRows.isEmpty()) recRows.get(0).get(0).requestFocus();
+                });
+            } catch (Exception e) {
+                party.setFailed();
+                runOnUiThread(() -> {
+                    partyPicking = false;
+                    if (!partyOpen) { handler.postDelayed(endParty, PARTY_LINGER_MS); return; }
+                    partyStatus.setText("Couldn't pick films: " + e.getMessage());
+                    renderGuests();
+                });
+            }
+        }).start();
+    }
+
+    private static String list(org.json.JSONArray a, String none) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; a != null && i < a.length(); i++) {
+            // Drop the emoji from "😂 Funny" so Claude reads plain words.
+            sb.append(sb.length() > 0 ? ", " : "").append(a.optString(i).replaceAll("^[^\\p{L}]+", ""));
+        }
+        return sb.length() > 0 ? sb.toString() : none;
     }
 
     private org.json.JSONArray askSections() {
@@ -3199,11 +3427,11 @@ public class MainActivity extends Activity {
         card.setPadding(dp(10), dp(8), dp(14), dp(8));
         card.setVisibility(View.GONE);
         teamCard = card;
-        teamBadge = text(10, "sans-serif-black", 0xFF1D428A);
+        teamBadge = text(10, "sans-serif-black", getColor(R.color.team_primary));
         teamBadge.setText(getString(R.string.team_badge));
         teamBadge.setGravity(Gravity.CENTER);
         GradientDrawable b = new GradientDrawable();
-        b.setColor(0xFFFDB927);
+        b.setColor(getColor(R.color.team_secondary));
         b.setCornerRadius(dp(10));
         teamBadge.setBackground(b);
         card.addView(teamBadge, llp(dp(38), dp(28), 0, 0, dp(10), 0));
@@ -3258,6 +3486,7 @@ public class MainActivity extends Activity {
                 else if (state.equals("pre") && next == null) next = e;
             }
             teamLive = live != null;
+            applyGameDay();
             if (live != null) {
                 maybeAlertLive(live, us);
                 teamLine1.setText("● LIVE   " + scoreLine(live, us) + "   " + status(live));
@@ -3282,6 +3511,29 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             android.util.Log.e(TAG, "team parse failed", e);
         }
+    }
+
+    // Game day: while the team plays, the home screen takes on its colours (blue rising from the bottom left,
+    // a touch of gold top right). Only during the game; it fades out at the final buzzer.
+    private View gameTint;
+
+    private View buildGameTint() {
+        gameTint = new View(this);
+        int a = getColor(R.color.team_primary), b = getColor(R.color.team_secondary);
+        gameTint.setBackground(new GradientDrawable(GradientDrawable.Orientation.BL_TR,
+                new int[]{withAlpha(a, 0.75f), withAlpha(a, 0.3f), 0x00000000, withAlpha(b, 0.22f)}));
+        gameTint.setAlpha(0f);
+        gameTint.setVisibility(View.GONE);
+        return gameTint;
+    }
+
+    private void applyGameDay() {
+        boolean on = teamLive;
+        if (on == (gameTint.getVisibility() == View.VISIBLE)) return;
+        gameTint.animate().cancel();
+        if (on) gameTint.setVisibility(View.VISIBLE);
+        gameTint.animate().alpha(on ? 1f : 0f).setDuration(2000)
+                .withEndAction(() -> { if (!on) gameTint.setVisibility(View.GONE); }).start();
     }
 
     /** "W 126–119 vs ORL" for finished games, "GS 78 – 72 NO" while live. */
@@ -3351,7 +3603,7 @@ public class MainActivity extends Activity {
     private final Runnable goAmbient = this::enterAmbient;
 
     private void enterAmbient() {
-        if (!hasWindowFocus()) { resetIdle(); return; } // a menu or details sheet is open
+        if (!hasWindowFocus() || partyOpen) { resetIdle(); return; } // a menu, details sheet or the party is open
         ambient = true;
         focusBeforeAmbient = getCurrentFocus();
         ui.animate().cancel();

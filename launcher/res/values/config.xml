@@ -59,6 +59,16 @@
     <string name="team_league" translatable="false">basketball/nba</string>
     <string name="team_id" translatable="false">gs</string>
     <string name="team_badge" translatable="false">GSW</string>
+    <!-- Game day: team colours for the badge, and the home screen's tint while a game is live. -->
+    <color name="team_primary">#FF1D428A</color>
+    <color name="team_secondary">#FFFDB927</color>
+    <!-- While a game is live, a small score ticker in the corner over whatever you're watching. -->
+    <bool name="game_ticker">true</bool>
+    <!-- App to open at tip-off (package name, e.g. com.nba.game); empty = don't switch. -->
+    <string name="game_app" translatable="false"></string>
+
+    <!-- A banner over whatever you're watching when the Personal feed sees a package delivered. -->
+    <bool name="delivery_banner">true</bool>
 
     <!-- Minutes without a button press before everything fades out, leaving only the aerial video. 0 = never. -->
     <integer name="idle_minutes">2</integer>

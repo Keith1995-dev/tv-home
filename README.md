@@ -76,6 +76,11 @@ Undo everything with `tools/restore.sh <the same list>`.
   from it). Hovering Stremio or YouTube opens a small continue-watching strip above the dock.
 - **Discover**: Claude's picks and top 10s for your streaming apps. Mark titles as seen, refresh,
   or press **Ask** and say "new Malayalam movies this year"; each pick opens in Stremio.
+- **Watch party**: friends scan a QR code on the TV, pick their mood and languages on their phones,
+  and Claude picks three films for the whole group. The picks show in Discover and on their phones.
+- **Over whatever you're watching**: a banner when a package is delivered (from the Personal feed),
+  and during a live game a small score ticker in the corner. Game day also tints the home screen in
+  your team's colours, and `game_app` in `config.xml` can switch to the game at tip-off.
 - **Backgrounds**: Apple TV aerial videos (landscapes, cities, space, underwater), with paintings,
   Google Earth View and NASA images between clips. Older TVs get the bundled nature photos.
 - Small touches: a fact line that changes every 5 minutes, a morning briefing, a live-game alert,
