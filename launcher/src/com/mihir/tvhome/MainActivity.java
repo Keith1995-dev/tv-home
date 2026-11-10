@@ -388,7 +388,7 @@ public class MainActivity extends Activity {
         recsStatus.setShadowLayer(dp(10), 0, dp(1), 0xB3000000);
         left.addView(recsStatus, llp(-2, -2, 0, dp(8), 0, 0));
         for (TextView t : new TextView[]{greeting, clock, ampm, date}) t.setShadowLayer(dp(10), 0, dp(1), 0xB3000000);
-        header.addView(left, new FrameLayout.LayoutParams(dp(420), -2, Gravity.START | Gravity.TOP));
+        header.addView(left, new FrameLayout.LayoutParams(dp(560), -2, Gravity.START | Gravity.TOP));
 
         LinearLayout right = new LinearLayout(this);
         right.setGravity(Gravity.CENTER_VERTICAL);
@@ -2447,7 +2447,8 @@ public class MainActivity extends Activity {
     // name, time zone, latitude, longitude (for the small weather readout)
     private static final String[][] WORLD_CLOCKS = {
             {"Kochi", "Asia/Kolkata", "9.9312", "76.2673"},
-            {"Sydney", "Australia/Sydney", "-33.8688", "151.2093"}};
+            {"Sydney", "Australia/Sydney", "-33.8688", "151.2093"},
+            {"Belfast", "Europe/London", "54.5973", "-5.9301"}};
     private final List<WorldClock> worldClocks = new ArrayList<>();
 
     /** A glass chip: small analog dial (light by day, dark at night), the time, and the day plus hours ahead. */
