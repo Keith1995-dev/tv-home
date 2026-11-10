@@ -37,6 +37,7 @@ printf '%s\n' \
   "rm -f /data/local/tmp/tvhome.apk" \
   "pm grant com.mihir.tvhome android.permission.ACCESS_FINE_LOCATION" \
   "appops set com.mihir.tvhome SYSTEM_ALERT_WINDOW allow" \
+  "cmd notification allow_listener com.mihir.tvhome/com.mihir.tvhome.MediaWatch" \
   "cmd package set-home-activity --user 0 com.mihir.tvhome/.MainActivity" \
   "pm disable-user --user 0 $STOCK_LAUNCHER" \
   "pm disable-user --user 0 com.google.android.tungsten.setupwraith" \

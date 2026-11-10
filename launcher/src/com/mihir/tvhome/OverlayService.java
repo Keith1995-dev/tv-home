@@ -91,7 +91,13 @@ public class OverlayService extends Service {
         android.content.IntentFilter sf = new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
         sf.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(screenOn, sf);
+        if (getResources().getBoolean(R.bool.movie_lights)) {
+            movieLights = new MovieLights(this, handler);
+            movieLights.start();
+        }
     }
+
+    private MovieLights movieLights;
 
     @Override
     public int onStartCommand(Intent i, int flags, int id) {
@@ -154,6 +160,7 @@ public class OverlayService extends Service {
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         unregisterReceiver(screenOn);
+        if (movieLights != null) movieLights.stop();
         stopMusic();
         hideTicker();
         if (running == this) running = null;
@@ -326,7 +333,11 @@ public class OverlayService extends Service {
     // on Home, the home screen shows its own full briefing; briefing_day makes sure you only get one a day.
     private final android.content.BroadcastReceiver screenOn = new android.content.BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
-            if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) { stopMusic(); return; } // TV off: radio off too
+            if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) { // TV off: radio off, lights back to normal
+                stopMusic();
+                if (movieLights != null) movieLights.screenOff();
+                return;
+            }
             handler.removeCallbacks(wakeBriefing);
             handler.postDelayed(wakeBriefing, 4000); // give Home a moment to come back first
             // Alerts only show while the screen is on, so catch up on anything that came in while it was off.
