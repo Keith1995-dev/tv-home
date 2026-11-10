@@ -574,10 +574,13 @@ public class MainActivity extends Activity {
 
     private void setTabIndicator(float x, float w) {
         tabIndicator.setTranslationX(x);
-        if (tabIndicator.getLayoutParams().width != Math.round(w)) {
-            tabIndicator.getLayoutParams().width = Math.round(w);
-            tabIndicator.requestLayout();
-        }
+        int wi = Math.round(w);
+        // Resized in place each frame (a requestLayout here would re-measure the whole screen 30 times a second);
+        // the layout params only matter for the next real layout.
+        boolean first = tabIndicator.getLayoutParams().width == 0;
+        tabIndicator.getLayoutParams().width = wi;
+        if (first) tabIndicator.requestLayout();
+        else if (tabIndicator.getWidth() != wi) tabIndicator.setRight(tabIndicator.getLeft() + wi);
     }
 
     private void styleTabs() {
@@ -673,7 +676,7 @@ public class MainActivity extends Activity {
                 bg.setLit(has);
                 name.setTextColor(has ? 0xFF111111 : Color.WHITE);
                 what.setTextColor(has ? 0xB3111111 : 0xB3FFFFFF);
-                depth(v, has, 10, 1.06f);
+                focusPop(v, has, 1.06f);
                 if (has) lastFocusedId = v.getId();
             });
             tile.setOnClickListener(v -> playStation(st[0]));
@@ -903,7 +906,7 @@ public class MainActivity extends Activity {
             shine.animate().alpha(has ? 1f : 0f).setDuration(160).start();
             label.animate().alpha(has ? 1f : 0f).translationY(has ? dp(4) : 0).setDuration(200).start();
             halo.show(has);
-            depth(v, has, 12, inDock ? 1.12f : 1.1f);
+            focusPop(v, has, inDock ? 1.12f : 1.1f);
             if (!has || !inDock) return;
             lastFocusedId = v.getId();
             onDockFocus(app.pkg, v);
@@ -984,7 +987,7 @@ public class MainActivity extends Activity {
             bg.setLit(has);
             icon.setTextColor(has ? 0xFF111111 : Color.WHITE);
             name.setTextColor(has ? 0xFF333333 : 0xCCFFFFFF);
-            depth(v, has, 12, 1.12f);
+            focusPop(v, has, 1.12f);
             if (!has) return;
             lastFocusedId = v.getId();
             title.setText("All apps");
@@ -1714,7 +1717,7 @@ public class MainActivity extends Activity {
         posterByKey.put(recKey(it), poster);
         poster.setOnFocusChangeListener((v, has) -> {
             shine.animate().alpha(has ? 1f : 0f).setDuration(120).start();
-            depth(v, has, 14, 1.1f);
+            focusPop(v, has, 1.1f);
             t.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             s.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             if (has) {
@@ -3228,7 +3231,7 @@ public class MainActivity extends Activity {
             bg.setLit(has);
             t.setTextColor(has ? 0xFF111111 : Color.WHITE);
             s.setTextColor(has ? 0x99111111 : 0x99FFFFFF);
-            depth(v, has, 8, 1.05f);
+            focusPop(v, has, 1.05f);
         });
         return card;
     }
@@ -4097,47 +4100,15 @@ public class MainActivity extends Activity {
         wifiPill.setAlpha("Offline".equals(name) ? 0.45f : 1f);
     }
 
-    // ---------------------------------------------------------------- depth on focus
-
-    // The selected card lifts off the screen (a real shadow under it) and swings in from the side you came from,
-    // settling with a little overshoot. Only the one focused view animates, so it stays cheap on the TV's GPU.
-    private static final android.animation.TimeInterpolator FOCUS_POP = new android.view.animation.OvershootInterpolator(1.2f);
-    private float lostX = Float.NaN, lostY;
-    private final int[] depthLoc = new int[2];
+    // ---------------------------------------------------------------- focus pop
 
     /**
-     * Grow, lift and settle the focused view in ONE animation drawn from a GPU layer (separate animations for
-     * scale and tilt fought each other and stuttered on this TV). Replaces the callers' own scale animation.
+     * The focused view grows with a spring, drawn from a GPU layer. (A tilt and a lifted shadow were tried here and
+     * taken out: on this TV, which draws the home screen at about 30 fps, they read as jitter.)
      */
-    private void depth(View v, boolean has, float lift, float scale) {
-        v.getLocationOnScreen(depthLoc);
-        float cx = depthLoc[0] + v.getWidth() / 2f, cy = depthLoc[1] + v.getHeight() / 2f;
-        if (!has) {
-            lostX = cx;
-            lostY = cy;
-            v.animate().scaleX(1f).scaleY(1f).rotationX(0).rotationY(0).translationZ(0)
-                    .setInterpolator(SOFT).setDuration(220).withLayer().start();
-            return;
-        }
-        v.setCameraDistance(8000 * getResources().getDisplayMetrics().density);
-        if (v.getOutlineProvider() == ViewOutlineProvider.BACKGROUND) { // glass cards: give the shadow a shape
-            v.setOutlineProvider(new ViewOutlineProvider() {
-                @Override public void getOutline(View view, Outline o) {
-                    o.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(14));
-                    o.setAlpha(1f);
-                }
-            });
-        }
-        float dx = Float.isNaN(lostX) ? 0 : cx - lostX, dy = Float.isNaN(lostX) ? 0 : cy - lostY;
-        lostX = Float.NaN;
-        // Coming from the left, the right edge leads; from below, the top edge leads.
-        v.animate().cancel();
-        if (Math.abs(dx) > Math.abs(dy)) v.setRotationY(dx > 0 ? -5f : 5f);
-        else if (dy != 0) v.setRotationX(dy > 0 ? 4f : -4f);
-        // One gentle overshoot, no wobble: at the ~30 fps this TV draws the home screen, a spring's back-and-forth
-        // reads as a shudder.
-        v.animate().scaleX(scale).scaleY(scale).rotationX(0).rotationY(0).translationZ(dp(lift))
-                .setInterpolator(FOCUS_POP).setDuration(450).withLayer().start();
+    private void focusPop(View v, boolean has, float scale) {
+        v.animate().scaleX(has ? scale : 1f).scaleY(has ? scale : 1f)
+                .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 420 : 240).withLayer().start();
     }
 
     /** A soft oval of the app's own colour that spills out from behind its tile while the tile is focused. */
@@ -4149,9 +4120,10 @@ public class MainActivity extends Activity {
             super(c);
             this.color = color;
             setAlpha(0f);
-            setScaleX(0.85f);
-            setScaleY(0.85f);
         }
+
+        // Fading never needs an offscreen buffer: the halo is one shape, so alpha goes straight onto the paint.
+        @Override public boolean hasOverlappingRendering() { return false; }
 
         @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
             paint.setShader(new android.graphics.RadialGradient(w / 2f, h / 2f, w / 2f,
@@ -4169,9 +4141,7 @@ public class MainActivity extends Activity {
         }
 
         void show(boolean has) {
-            // From a GPU layer: the gradient is drawn once, then only faded and scaled.
-            animate().alpha(has ? 1f : 0f).scaleX(has ? 1f : 0.85f).scaleY(has ? 1f : 0.85f)
-                    .setDuration(has ? 420 : 240).withLayer().start();
+            animate().alpha(has ? 1f : 0f).setDuration(has ? 360 : 200).start();
         }
     }
 
