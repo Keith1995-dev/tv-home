@@ -78,9 +78,15 @@ Undo everything with `tools/restore.sh <the same list>`.
   or press **Ask** and say "new Malayalam movies this year"; each pick opens in Stremio.
 - **Watch party**: friends scan a QR code on the TV, pick their mood and languages on their phones,
   and Claude picks three films for the whole group. The picks show in Discover and on their phones.
-- **Over whatever you're watching**: a banner when a package is delivered (from the Personal feed),
-  during a live game a small score ticker in the corner (select the team card on Home and press OK to
-  hide it for that game), and the morning briefing when the TV wakes up in another app. Game day also
+- **Over whatever you're watching**: banners for urgent email (Claude flags fraud alerts, cancelled
+  flights and the like; only the sender and a reason show), a package out for delivery or delivered, a
+  subscription that charges tomorrow, and rain starting within 45 minutes. During a live game a small
+  score ticker sits in the corner (select the team card on Home and press OK to hide it for that game),
+  and the morning briefing shows when the TV wakes up in another app.
+- **Screensaver on demand**: the mountain button in the top bar plays any downloaded aerial, or just
+  paintings, Earth View or space pictures, straight away.
+- **Work → Music**: focus and sleep radio that keeps playing while you look around, and Ask understands
+  "music to help me focus" as well as "a fast 90s thriller under two hours". Game day also
   tints the home screen in your team's colours, and `game_app` in `config.xml` can switch to the game at
   tip-off. After the final, Claude writes a one-line "what you missed" recap under the score.
 - **Backgrounds**: Apple TV aerial videos (landscapes, cities, space, underwater), with paintings,

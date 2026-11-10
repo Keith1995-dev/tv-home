@@ -7,6 +7,12 @@ What leaves Google: the text of new emails from the last 10 days (minus Promotio
 emails from the last 120 days, is sent to the Claude API to find flights, packages and to-dos. Each email is sent
 once. Calendar events are not sent to Claude.
 
+Every 5 minutes it also checks new inbox mail (sender, subject and the first 600 characters) for anything urgent:
+a fraud or security alert, an account or SIM change, a failed payment, a cancelled flight, an urgent note from
+family. The TV shows each one once as a small banner with the sender and a short reason, never the email itself.
+The 5-minute timer adds itself the first time the 30-minute one runs the new code; run `testUrgent` to see what
+it flags in the last 3 hours of mail.
+
 ## Setup (about 5 minutes)
 
 1. Open <https://script.google.com> signed in to your personal Google account → **New project**. Name it "TV Personal".

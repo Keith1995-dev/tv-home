@@ -247,7 +247,7 @@ final class PersonalPage extends FrameLayout {
         for (int i = 0; at != null && i < at.length(); i++) {
             JSONObject a = at.getJSONObject(i);
             String st = a.optString("status");
-            String icon = "bill".equals(st) ? "💳 " : "appointment".equals(st) ? "📍 " : "⏰ ";
+            String icon = "bill".equals(st) ? "💳 " : "renewal".equals(st) ? "🔁 " : "appointment".equals(st) ? "📍 " : "⏰ ";
             addItem(out, icon + a.optString("title"), a.optString("detail"), a.optString("time"),
                     !"appointment".equals(st), today, last);
         }

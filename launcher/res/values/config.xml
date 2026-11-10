@@ -67,8 +67,13 @@
     <!-- App to open at tip-off (package name, e.g. com.nba.game); empty = don't switch. -->
     <string name="game_app" translatable="false"></string>
 
-    <!-- A banner over whatever you're watching when the Personal feed sees a package delivered. -->
+    <!-- Banners over whatever you're watching, from the Personal feed: a package out for delivery or delivered,
+         and email Claude thinks can't wait (fraud alerts, a cancelled flight, an urgent note from family). Only
+         the sender and a short reason show, never the email itself. -->
     <bool name="delivery_banner">true</bool>
+    <bool name="urgent_banner">true</bool>
+    <!-- A banner when it's dry now but rain starts at home within 45 minutes (Open-Meteo, at most every 3 hours). -->
+    <bool name="rain_alert">true</bool>
 
     <!-- Minutes without a button press before everything fades out, leaving only the aerial video. 0 = never. -->
     <integer name="idle_minutes">2</integer>

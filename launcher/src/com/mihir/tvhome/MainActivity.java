@@ -395,6 +395,8 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         TextView inputs = iconPill(R.drawable.ic_input, "Inputs");
         inputs.setOnClickListener(v -> showInputs(v));
+        TextView saver = iconPill(R.drawable.ic_screensaver, "Screensaver");
+        saver.setOnClickListener(v -> showScreensavers(v));
         wifiPill = iconPill(R.drawable.ic_wifi, "Wi-Fi");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = iconPill(R.drawable.ic_settings, "Settings");
@@ -407,7 +409,7 @@ public class MainActivity extends Activity {
             recsJump = true;
             loadRecs(true);
         });
-        List<TextView> row = new ArrayList<>(Arrays.asList(inputs, picks, wifiPill, settings, update));
+        List<TextView> row = new ArrayList<>(Arrays.asList(inputs, saver, picks, wifiPill, settings, update));
         if (isInstalled(GOOGLE_TV)) {
             TextView gtv = pill("Google TV", "▣");
             gtv.setOnClickListener(v -> openGoogleTv());
@@ -543,7 +545,8 @@ public class MainActivity extends Activity {
             t.setBackground(g);
             t.setTextColor(focused ? 0xFF111111 : selected ? Color.WHITE : 0x99FFFFFF);
             // Down goes to the top bar on Entertainment; the other views have nothing to select yet.
-            t.setNextFocusDownId(tab == 0 && !pills.isEmpty() ? pills.get(0).getId() : t.getId());
+            t.setNextFocusDownId(tab == 0 && !pills.isEmpty() ? pills.get(0).getId()
+                    : tab == 2 && !stationTiles.isEmpty() ? stationTiles.get(0).getId() : t.getId());
         }
     }
 
@@ -562,24 +565,150 @@ public class MainActivity extends Activity {
         to.setAlpha(0f);
         to.animate().alpha(1f).setDuration(260).setInterpolator(SOFT).withLayer().start();
         if (to == personalPage) personalPage.shown();
+        if (to == workPage) updateMusicStatus();
         if (to == scroll) scroll.scrollTo(0, 0);
     }
 
+    // ---------------------------------------------------------------- Work: focus music
+
+    // Free internet radio (FluxFM, WQXR, Radio Paradise, Ambient Sleeping Pill), plus Lofi Girl's live stream on
+    // YouTube. id, name, what it sounds like, stream (or youtube:<video id>), row.
+    private static final String[][] STATIONS = {
+            {"chillhop", "Chillhop", "Lo-fi beats to work to", "https://streams.fluxfm.de/Chillhop/mp3-128/streams.fluxfm.de/", "focus"},
+            {"classical", "WQXR", "Classical, from New York", "https://stream.wqxr.org/wqxr.aac", "focus"},
+            {"mellow", "RP Mellow", "Mellow mix, soft vocals", "https://stream.radioparadise.com/mellow-128", "focus"},
+            {"global", "RP World", "Laid-back world music", "https://stream.radioparadise.com/global-128", "focus"},
+            {"lofi", "Lofi Girl", "Lo-fi beats, on YouTube", "youtube:jfKfPfyJRdk", "focus"},
+            {"serenity", "RP Serenity", "Beatless ambient, very calm", "https://stream.radioparadise.com/serenity", "sleep"},
+            {"sleepingpill", "Sleeping Pill", "Slow ambient for sleep", "https://radio.stereoscenic.com/asp-s", "sleep"}};
+    private final List<View> stationTiles = new ArrayList<>();
+    private TextView musicStatus;
+
     private View buildWorkPage() {
         FrameLayout page = new FrameLayout(this);
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setPadding(dp(32), dp(24), dp(32), dp(24));
-        liquid(card, dp(22));
-        TextView h = text(20, "sans-serif-light", Color.WHITE);
-        h.setText("Work");
-        card.addView(h);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setClipChildren(false);
+        TextView h = text(22, "sans-serif-light", Color.WHITE);
+        h.setText("Music");
+        col.addView(h, llp(-2, -2, 0, 0, 0, 0));
         TextView s = text(11, "sans-serif", 0x99FFFFFF);
-        s.setText("Slack and your work Gmail will show up here in phase 2.");
-        card.addView(s, llp(-2, -2, 0, dp(6), 0, 0));
-        page.addView(card, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        s.setText("Keeps playing while you look around. Starting a video, or turning the TV off, stops it.");
+        col.addView(s, llp(-2, -2, 0, dp(4), 0, dp(6)));
+
+        Map<String, LinearLayout> rows = new java.util.LinkedHashMap<>();
+        Map<String, List<View>> rowTiles = new HashMap<>();
+        for (String[] st : STATIONS) {
+            LinearLayout row = rows.get(st[4]);
+            if (row == null) {
+                TextView label = text(9, "sans-serif-medium", 0x99FFFFFF);
+                label.setLetterSpacing(0.22f);
+                label.setText(st[4].equals("sleep") ? "SLEEP" : "FOCUS");
+                col.addView(label, llp(-2, -2, 0, dp(12), 0, dp(6)));
+                row = new LinearLayout(this);
+                row.setClipChildren(false);
+                col.addView(row, llp(-2, -2, 0, 0, 0, 0));
+                rows.put(st[4], row);
+                rowTiles.put(st[4], new ArrayList<>());
+            }
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER_VERTICAL);
+            tile.setPadding(dp(14), dp(10), dp(12), dp(10));
+            tile.setFocusable(true);
+            tile.setClickable(true);
+            tile.setId(View.generateViewId());
+            LiquidGlass bg = liquid(tile, dp(16));
+            TextView name = text(13, "sans-serif-medium", Color.WHITE);
+            name.setText(st[1]);
+            TextView what = text(9, "sans-serif", 0xB3FFFFFF);
+            what.setText(st[2]);
+            tile.addView(name);
+            tile.addView(what, llp(-2, -2, 0, dp(2), 0, 0));
+            tile.setOnFocusChangeListener((v, has) -> {
+                bg.setLit(has);
+                name.setTextColor(has ? 0xFF111111 : Color.WHITE);
+                what.setTextColor(has ? 0xB3111111 : 0xB3FFFFFF);
+                v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f)
+                        .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 360 : 220).withLayer().start();
+                if (has) lastFocusedId = v.getId();
+            });
+            tile.setOnClickListener(v -> playStation(st[0]));
+            stationTiles.add(tile);
+            List<View> mine = rowTiles.get(st[4]);
+            row.addView(tile, llp(dp(140), dp(60), mine.isEmpty() ? 0 : dp(10), 0, 0, 0));
+            mine.add(tile);
+        }
+
+        LinearLayout actions = new LinearLayout(this);
+        TextView ask = pill("Ask for music", "🎙");
+        ask.setOnClickListener(v -> startAsk());
+        TextView stop = pill("Stop", "■");
+        stop.setOnClickListener(v -> { OverlayService.music(this, null, null); musicStatus.postDelayed(this::updateMusicStatus, 300); });
+        for (TextView p : new TextView[]{ask, stop}) {
+            // pill() scrolls the Entertainment view when focused; harmless here, it's hidden.
+            actions.addView(p, llp(-2, dp(PILL_H), p == ask ? 0 : dp(10), 0, 0, 0));
+        }
+        col.addView(actions, llp(-2, -2, 0, dp(20), 0, 0));
+        musicStatus = text(11, "sans-serif-medium", 0xFF8FD4FF);
+        col.addView(musicStatus, llp(-2, -2, 0, dp(14), 0, 0));
+        TextView later = text(9, "sans-serif", 0x66FFFFFF);
+        later.setText("Try Ask: \"music to help me focus\", \"something to fall asleep to\" or \"upbeat music to clean the house\"");
+        col.addView(later, llp(-2, -2, 0, dp(6), 0, 0));
+        page.addView(col, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        List<View> last = rowTiles.get("sleep") != null ? rowTiles.get("sleep") : stationTiles;
+        for (View t : last) t.setNextFocusDownId(ask.getId());
+        ask.setNextFocusUpId(last.get(0).getId());
+        stop.setNextFocusUpId(last.get(0).getId());
+        updateMusicStatus();
         return page;
+    }
+
+    private void playStation(String id) {
+        for (String[] st : STATIONS) {
+            if (!st[0].equals(id)) continue;
+            if (st[3].startsWith("youtube:")) {
+                OverlayService.music(this, null, null);
+                launch(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=" + st[3].substring(8)))
+                        .setPackage(YOUTUBE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return;
+            }
+            OverlayService.music(this, st[3], st[1]);
+            musicStatus.setText("Tuning in to " + st[1] + "…");
+            musicStatus.postDelayed(this::updateMusicStatus, 6000); // says so if the stream didn't start
+            return;
+        }
+    }
+
+    private void updateMusicStatus() {
+        String now = OverlayService.nowPlaying;
+        musicStatus.setText(now == null ? "Nothing playing" : "♪  Now playing: " + now);
+    }
+
+    /** "groovesalad (Chilled downtempo beats), fluid (…), …" for Claude to choose from. */
+    private static String stationChoices() {
+        StringBuilder sb = new StringBuilder();
+        for (String[] st : STATIONS) sb.append(sb.length() > 0 ? ", " : "").append(st[0]).append(" (").append(st[2]).append(')');
+        return sb.toString();
+    }
+
+    /** Music from Ask: one of the stations, or a YouTube search when none of them fits. */
+    private void playVibe(org.json.JSONObject m, String q) {
+        String station = m.optString("station"), search = m.optString("youtube").trim();
+        boolean known = false;
+        for (String[] st : STATIONS) known |= st[0].equals(station);
+        if (known) {
+            playStation(station);
+            toast("🎙 " + q + "  →  " + m.optString("why", station));
+            musicStatus.setText("🎙 " + q + "  →  " + m.optString("why", station));
+            musicStatus.postDelayed(this::updateMusicStatus, 8000);
+        } else if (!search.isEmpty()) {
+            OverlayService.music(this, null, null);
+            Intent i = new Intent(Intent.ACTION_SEARCH).setPackage(YOUTUBE).putExtra(android.app.SearchManager.QUERY, search)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (!launch(i)) toast("Couldn't open YouTube search for “" + search + "”");
+        }
     }
 
     // ---------------------------------------------------------------- apps
@@ -1004,6 +1133,77 @@ public class MainActivity extends Activity {
         CharSequence c = t.loadCustomLabel(this);
         if (c == null || c.length() == 0) c = t.loadLabel(this);
         return String.valueOf(c);
+    }
+
+    // ---------------------------------------------------------------- screensaver on demand
+
+    // null = the usual mix; "clip:<file>" = that aerial on repeat; "still:<kind>" = only that kind of picture.
+    // Cleared when you press a button, so idle mode goes back to the mix.
+    private String pinnedSaver;
+
+    private static final String[][] STILL_NAMES = {{"art", "🖼  Paintings"}, {"earth", "🌍  Earth from above"}, {"space", "🔭  Hubble and Webb"}};
+
+    /** What's on the TV already, so anything picked starts straight away (aerials not downloaded yet aren't listed). */
+    private void showScreensavers(View anchor) {
+        // Two columns so it fits under the top bar: the mix and the pictures on the left, the aerial videos on the right.
+        List<TextView> left = new ArrayList<>(), right = new ArrayList<>();
+        left.add(inputRow("✦  Mix of everything", () -> startScreensaver(null)));
+        Set<String> kinds = new HashSet<>();
+        for (java.io.File f : cachedStills()) kinds.add(f.getName().substring(0, f.getName().indexOf('_')));
+        for (String[] k : STILL_NAMES) if (kinds.contains(k[0])) left.add(inputRow(k[1], () -> startScreensaver("still:" + k[0])));
+        Set<String> places = new HashSet<>();
+        java.io.File[] clips = aerialsOn() ? cachedAerials() : new java.io.File[0];
+        Arrays.sort(clips, (a, b) -> String.valueOf(aerialNames.get(a.getName())).compareTo(String.valueOf(aerialNames.get(b.getName()))));
+        for (java.io.File f : clips) {
+            String place = aerialNames.get(f.getName());
+            if (place == null || !places.add(place)) continue;
+            right.add(inputRow("🎬  " + place, () -> startScreensaver("clip:" + f.getName())));
+        }
+
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(dp(8), dp(8), dp(8), dp(8));
+        box.setBackground(glass(dp(18), GLASS_DARK));
+        PopupWindow pw = new PopupWindow(box, right.isEmpty() ? dp(230) : dp(440), -2, true);
+        for (List<TextView> rows : Arrays.asList(left, right)) {
+            if (rows.isEmpty()) continue;
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            box.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+            for (int i = 0; i < rows.size(); i++) {
+                TextView r = rows.get(i);
+                r.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                r.setOnClickListener(v -> { pw.dismiss(); ((Runnable) v.getTag()).run(); });
+                col.addView(r, new LinearLayout.LayoutParams(-1, dp(32)));
+                r.setNextFocusUpId(rows.get(Math.max(0, i - 1)).getId());
+                r.setNextFocusDownId(rows.get(Math.min(rows.size() - 1, i + 1)).getId());
+                List<TextView> other = rows == left ? right : left;
+                int across = other.isEmpty() ? r.getId() : other.get(Math.min(i, other.size() - 1)).getId();
+                if (rows == left) { r.setNextFocusLeftId(r.getId()); r.setNextFocusRightId(across); }
+                else { r.setNextFocusLeftId(across); r.setNextFocusRightId(r.getId()); }
+            }
+        }
+        pw.setOutsideTouchable(true);
+        pw.setElevation(dp(16));
+        pw.setOnDismissListener(anchor::requestFocus);
+        pw.showAsDropDown(anchor, 0, dp(8), Gravity.START);
+        left.get(0).requestFocus();
+    }
+
+    private void startScreensaver(String pin) {
+        pinnedSaver = pin;
+        // Once the menu has gone and the window has focus again; any button brings the home screen back.
+        handler.postDelayed(() -> {
+            enterAmbient();
+            if (!ambient || pin == null) return;
+            if (pin.startsWith("clip:")) {
+                resumeAerial = null;
+                playAerial();
+            } else {
+                releasePlayer();
+                stillsLeft = Integer.MAX_VALUE;
+                showStill();
+            }
+        }, 350);
     }
 
     private TextView inputRow(String label, Runnable action) {
@@ -1700,7 +1900,7 @@ public class MainActivity extends Activity {
         if (!hasApiKey()) { toast("Add your Claude API key in secrets.xml first"); return; }
         Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Ask Discover, e.g. \"new Malayalam movies this year\"");
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Ask, e.g. \"a fast 90s thriller under two hours\" or \"music for reading\"");
         // Two apps answer this on the Hisense; go straight to Google's TV voice input instead of asking which.
         if (isInstalled("com.google.android.katniss")) i.setPackage("com.google.android.katniss");
         try {
@@ -1721,9 +1921,9 @@ public class MainActivity extends Activity {
     private void typeAsk() {
         android.widget.EditText box = new android.widget.EditText(this);
         box.setSingleLine(true);
-        box.setHint("e.g. new Malayalam movies this year");
+        box.setHint("e.g. a fast 90s thriller under two hours, or music for reading");
         box.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
-        new android.app.AlertDialog.Builder(this).setTitle("Ask Discover").setView(box)
+        new android.app.AlertDialog.Builder(this).setTitle("Ask").setView(box)
                 .setPositiveButton("Ask", (d, w) -> { String q = box.getText().toString().trim(); if (!q.isEmpty()) runAsk(q); })
                 .setNegativeButton("Cancel", null).show();
     }
@@ -1741,10 +1941,16 @@ public class MainActivity extends Activity {
                 + "markdown: {\"sections\":[{\"title\":\"short heading for the answer, under 40 characters\",\"items\":"
                 + "[up to 15 items, best first]}]}. Each item: " + ITEM_SHAPE + ". Always fill imdb with the IMDb id. "
                 + "Only titles you found a source for."
-                + (seen.isEmpty() ? "" : " I've already seen these, leave them out unless I asked for them: " + seen + ".");
+                + (seen.isEmpty() ? "" : " I've already seen these, leave them out unless I asked for them: " + seen + ".")
+                + " If instead I asked for music or background sound (not something to watch), don't search: reply "
+                + "{\"sections\":[],\"music\":{\"station\":\"the best fit of " + stationChoices() + ", or \\\"\\\" if none "
+                + "fits\",\"youtube\":\"a YouTube search that would find it, used when no station fits\",\"why\":\"under "
+                + "40 characters, e.g. Calm ambient for reading\"}}.";
         new Thread(() -> {
             try {
                 String json = askClaude(prompt);
+                org.json.JSONObject music = new org.json.JSONObject(json).optJSONObject("music");
+                if (music != null) { runOnUiThread(() -> playVibe(music, q)); return; }
                 org.json.JSONArray secs = new org.json.JSONObject(json).getJSONArray("sections");
                 for (int s = 0; s < secs.length(); s++) {
                     org.json.JSONObject sec = secs.getJSONObject(s);
@@ -3782,6 +3988,10 @@ public class MainActivity extends Activity {
         aerialLabel.setAlpha(0f);
         stillCaption.animate().cancel();
         stillCaption.setAlpha(0f);
+        if (pinnedSaver != null) { // back to the usual mix after what's showing now
+            pinnedSaver = null;
+            if (stillsLeft > 3) stillsLeft = 1;
+        }
         if (animate) ui.animate().alpha(1f).setDuration(350).withLayer().start();
         else ui.setAlpha(1f);
         if (was && focusBeforeAmbient != null) focusBeforeAmbient.requestFocus();
@@ -4014,6 +4224,10 @@ public class MainActivity extends Activity {
         if (cached.length == 0) { handler.postDelayed(nextAerial, 15000); return; }
         java.io.File f = cached[rnd.nextInt(cached.length)];
         if (cached.length > 1 && f.getName().equals(lastAerial)) f = cached[(java.util.Arrays.asList(cached).indexOf(f) + 1) % cached.length];
+        if (pinnedSaver != null && pinnedSaver.startsWith("clip:")) {
+            java.io.File pick = new java.io.File(aerialDir(), pinnedSaver.substring(5));
+            if (pick.exists()) f = pick;
+        }
         int startAt = 0;
         if (resumeAerial != null && SystemClock.elapsedRealtime() - pausedAt < AERIAL_RESUME_WITHIN_MS) {
             java.io.File same = new java.io.File(aerialDir(), resumeAerial);
@@ -4222,7 +4436,7 @@ public class MainActivity extends Activity {
         java.io.File[] have = cachedStills();
         cacheMoreStills();
         int per = getResources().getInteger(R.integer.stills_per_break);
-        if (have.length == 0 || per <= 0) { playAerial(); return; }
+        if (have.length == 0 || per <= 0 || pinnedSaver != null) { playAerial(); return; } // a picked clip repeats
         if (player != null) { android.media.MediaPlayer p = player; player = null; p.release(); }
         aerialShowing = false;
         if (LiquidGlass.backdrop != null) LiquidGlass.backdrop.stop();
@@ -4240,6 +4454,8 @@ public class MainActivity extends Activity {
             byKind.computeIfAbsent(f.getName().substring(0, f.getName().indexOf('_')), k -> new ArrayList<>()).add(f);
         }
         List<String> kinds = new ArrayList<>(byKind.keySet());
+        String only = pinnedSaver != null && pinnedSaver.startsWith("still:") ? pinnedSaver.substring(6) : null;
+        if (only != null && byKind.containsKey(only)) kinds = Collections.singletonList(only);
         List<java.io.File> pool = byKind.get(kinds.get(rnd.nextInt(kinds.size())));
         java.io.File f = pool.get(rnd.nextInt(pool.size()));
         lastStill = f.getName();

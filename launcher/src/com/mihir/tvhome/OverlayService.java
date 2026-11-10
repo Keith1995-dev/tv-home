@@ -35,8 +35,9 @@ import java.util.Locale;
  */
 public class OverlayService extends Service {
     private static final String TAG = "tvhome";
-    private static final long PACKAGES_EVERY_MS = 10 * 60 * 1000L, SCHEDULE_EVERY_MS = 20 * 60 * 1000L,
-            LIVE_EVERY_MS = 20 * 1000L, FINAL_SHOWN_MS = 3 * 60 * 1000L, BANNER_MS = 12 * 1000L, BRIEFING_MS = 20 * 1000L;
+    private static final long FEED_EVERY_MS = 5 * 60 * 1000L, RAIN_EVERY_MS = 10 * 60 * 1000L, SCHEDULE_EVERY_MS = 20 * 60 * 1000L,
+            LIVE_EVERY_MS = 20 * 1000L, FINAL_SHOWN_MS = 3 * 60 * 1000L, BANNER_MS = 12 * 1000L, URGENT_MS = 20 * 1000L,
+            BRIEFING_MS = 20 * 1000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WindowManager wm;
@@ -84,64 +85,203 @@ public class OverlayService extends Service {
         nm.createNotificationChannel(new NotificationChannel("overlay", "Alerts over other apps", NotificationManager.IMPORTANCE_MIN));
         startForeground(1, new Notification.Builder(this, "overlay").setSmallIcon(R.drawable.ic_home)
                 .setContentTitle("TV Home alerts").setOngoing(true).build());
-        if (getResources().getBoolean(R.bool.delivery_banner)) handler.post(packagePoll);
+        handler.post(feedPoll);
+        if (getResources().getBoolean(R.bool.rain_alert)) handler.post(rainPoll);
         if (getResources().getBoolean(R.bool.game_ticker) || !getString(R.string.game_app).isEmpty()) handler.post(gamePoll);
-        registerReceiver(screenOn, new android.content.IntentFilter(Intent.ACTION_SCREEN_ON));
+        android.content.IntentFilter sf = new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
+        sf.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenOn, sf);
     }
 
     @Override
-    public int onStartCommand(Intent i, int flags, int id) { return START_STICKY; }
+    public int onStartCommand(Intent i, int flags, int id) {
+        if (i != null && "music".equals(i.getAction())) {
+            String url = i.getStringExtra("url");
+            if (url == null) stopMusic(); else playMusic(url, i.getStringExtra("name"));
+        }
+        return START_STICKY;
+    }
+
+    // ---------------------------------------------------------------- focus music
+
+    // Internet radio played from here, so it carries on while you move around the home screen and other apps.
+    // When something else takes the sound (a video app starting playback), the radio stops rather than talk over it.
+    private RadioPlayer radio;
+    private android.media.AudioFocusRequest focusReq;
+    static volatile String nowPlaying; // the station's name while playing, for the Work view
+
+    /** Start (url and name) or stop (url null) the radio. */
+    static void music(Context c, String url, String name) {
+        try {
+            c.startForegroundService(new Intent(c, OverlayService.class).setAction("music")
+                    .putExtra("url", url).putExtra("name", name));
+        } catch (RuntimeException e) {
+            android.util.Log.e(TAG, "music: " + e.getMessage());
+        }
+    }
+
+    private void playMusic(String url, String name) {
+        stopMusic();
+        android.media.AudioManager am = getSystemService(android.media.AudioManager.class);
+        android.media.AudioAttributes attrs = new android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build();
+        focusReq = new android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener(change -> {
+                    if (change == android.media.AudioManager.AUDIOFOCUS_LOSS) handler.post(this::stopMusic);
+                    else if (change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT && radio != null) radio.setVolume(0f);
+                    else if (change == android.media.AudioManager.AUDIOFOCUS_GAIN && radio != null) radio.setVolume(1f);
+                }, handler).build();
+        if (am.requestAudioFocus(focusReq) != android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return;
+        RadioPlayer[] self = new RadioPlayer[1];
+        self[0] = new RadioPlayer(url, why -> handler.post(() -> { if (radio == self[0]) stopMusic(); }));
+        radio = self[0];
+        nowPlaying = name;
+        radio.start();
+    }
+
+    private void stopMusic() {
+        nowPlaying = null;
+        if (radio != null) { radio.stop(); radio = null; }
+        if (focusReq != null) {
+            getSystemService(android.media.AudioManager.class).abandonAudioFocusRequest(focusReq);
+            focusReq = null;
+        }
+    }
 
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         unregisterReceiver(screenOn);
+        stopMusic();
         hideTicker();
         if (running == this) running = null;
         super.onDestroy();
     }
 
-    // ---------------------------------------------------------------- deliveries
+    // ---------------------------------------------------------------- alerts from the Personal feed
 
-    private final Runnable packagePoll = new Runnable() {
+    private final Runnable feedPoll = new Runnable() {
         @Override public void run() {
-            checkPackages();
-            handler.postDelayed(this, PACKAGES_EVERY_MS);
+            checkFeed();
+            handler.postDelayed(this, FEED_EVERY_MS);
         }
     };
 
-    private void checkPackages() {
+    /**
+     * Each thing shows once, the first time the feed has it while the screen is on: urgent mail, a package out for
+     * delivery or delivered, and a subscription that charges in the next day and a half. The very first check
+     * only learns what's already there, so installing doesn't replay a week of alerts.
+     */
+    private void checkFeed() {
         String url = getString(R.string.personal_feed_url).trim();
-        if (url.isEmpty()) return;
+        if (url.isEmpty() || !getSystemService(android.os.PowerManager.class).isInteractive()) return;
         new Thread(() -> {
             try {
-                JSONArray pk = new JSONObject(httpGet(url)).optJSONArray("packages");
-                if (pk == null) return;
-                JSONArray known = new JSONArray(prefs.getString("delivered_seen", "[]"));
+                JSONObject feed = new JSONObject(httpGet(url));
                 java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+                JSONArray known = new JSONArray(prefs.getString("alerts_seen", "[]"));
                 for (int i = 0; i < known.length(); i++) seen.add(known.getString(i));
-                boolean first = !prefs.getBoolean("delivered_seeded", false);
-                for (int i = 0; i < pk.length(); i++) {
-                    JSONObject p = pk.getJSONObject(i);
-                    if (!"delivered".equals(p.optString("status"))) continue;
-                    String key = p.optString("title").toLowerCase(Locale.ROOT);
-                    if (!seen.add(key) || first) continue; // the first check only learns what's already there
-                    String title = p.optString("title"), detail = p.optString("detail");
-                    handler.post(() -> showBanner("📦", "Delivered", title + (detail.isEmpty() ? "" : "  ·  " + detail), BANNER_MS));
+                boolean first = !prefs.getBoolean("alerts_seeded", false);
+                long now = System.currentTimeMillis();
+                java.util.List<Runnable> show = new java.util.ArrayList<>();
+
+                JSONArray urgent = feed.optJSONArray("urgent");
+                for (int i = 0; urgent != null && getResources().getBoolean(R.bool.urgent_banner) && i < urgent.length(); i++) {
+                    JSONObject u = urgent.getJSONObject(i);
+                    if (!seen.add("urgent:" + u.optString("id")) || first || now - u.optLong("at") > 12 * 3600_000L) continue;
+                    String from = u.optString("from"), why = u.optString("reason");
+                    show.add(() -> showBanner("⚠️", from, why, URGENT_MS, 0xFFFFB86B));
                 }
+                JSONArray pk = feed.optJSONArray("packages");
+                for (int i = 0; pk != null && getResources().getBoolean(R.bool.delivery_banner) && i < pk.length(); i++) {
+                    JSONObject p = pk.getJSONObject(i);
+                    String st = p.optString("status");
+                    if (!st.equals("delivered") && !st.equals("out")) continue;
+                    if (!seen.add(st + ":" + p.optString("title").toLowerCase(Locale.ROOT)) || first) continue;
+                    String line = p.optString("title") + (p.optString("detail").isEmpty() ? "" : "  ·  " + p.optString("detail"));
+                    if (st.equals("out")) show.add(() -> showBanner("🚚", "Out for delivery", line, BANNER_MS));
+                    else show.add(() -> showBanner("📦", "Delivered", line, BANNER_MS));
+                }
+                JSONArray att = feed.optJSONArray("attention");
+                for (int i = 0; att != null && i < att.length(); i++) {
+                    JSONObject a = att.getJSONObject(i);
+                    if (!"renewal".equals(a.optString("status"))) continue;
+                    long t = parseTime(a.optString("time"));
+                    if (t < now || t - now > 36 * 3600_000L) continue;
+                    if (!seen.add("renewal:" + a.optString("title").toLowerCase(Locale.ROOT) + a.optString("time")) || first) continue;
+                    String line = a.optString("title") + "  ·  " + a.optString("detail") + "  ·  " + a.optString("when");
+                    show.add(() -> showBanner("🔁", "Subscription charges soon", line, BANNER_MS));
+                }
+
                 JSONArray out = new JSONArray();
                 for (String k : seen) out.put(k);
-                while (out.length() > 60) out.remove(0);
-                prefs.edit().putString("delivered_seen", out.toString()).putBoolean("delivered_seeded", true).apply();
+                while (out.length() > 150) out.remove(0);
+                prefs.edit().putString("alerts_seen", out.toString()).putBoolean("alerts_seeded", true).apply();
+                for (Runnable r : show) handler.post(r);
             } catch (Exception e) {
-                android.util.Log.e(TAG, "delivery check failed: " + e.getMessage());
+                android.util.Log.e(TAG, "feed check failed: " + e.getMessage());
             }
         }).start();
     }
 
+    private static long parseTime(String iso) {
+        try { return java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli(); }
+        catch (RuntimeException e) { return 0; }
+    }
+
+    // ---------------------------------------------------------------- rain on the way
+
+    // Open-Meteo's 15-minute forecast for home: if it's dry now and rain starts within 45 minutes, say when.
+    // At most one alert every 3 hours, so a showery afternoon doesn't keep interrupting.
+    private final Runnable rainPoll = new Runnable() {
+        @Override public void run() {
+            checkRain();
+            handler.postDelayed(this, RAIN_EVERY_MS);
+        }
+    };
+
+    private void checkRain() {
+        if (!getSystemService(android.os.PowerManager.class).isInteractive()
+                || System.currentTimeMillis() - prefs.getLong("rain_alert_at", 0) < 3 * 3600_000L) return;
+        String url = "https://api.open-meteo.com/v1/forecast?latitude=" + getString(R.string.home_lat)
+                + "&longitude=" + getString(R.string.home_lon)
+                + "&current=precipitation&minutely_15=precipitation&forecast_minutely_15=4&timezone=auto";
+        new Thread(() -> {
+            try {
+                JSONObject w = new JSONObject(httpGet(url));
+                if (w.getJSONObject("current").optDouble("precipitation", 0) > 0) return; // already raining
+                JSONObject m = w.getJSONObject("minutely_15");
+                JSONArray times = m.getJSONArray("time"), mm = m.getJSONArray("precipitation");
+                for (int i = 1; i < mm.length(); i++) {
+                    double r = mm.optDouble(i, 0);
+                    if (r < 0.2) continue;
+                    java.time.LocalDateTime at = java.time.LocalDateTime.parse(times.getString(i));
+                    String when = at.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()));
+                    String kind = r >= 2.5 ? "Heavy rain" : r >= 0.8 ? "Rain" : "Light rain";
+                    prefs.edit().putLong("rain_alert_at", System.currentTimeMillis()).apply();
+                    handler.post(() -> showBanner("🌧", kind + " on the way", "Starting around " + when, BANNER_MS, 0xFF8FD4FF));
+                    return;
+                }
+            } catch (Exception e) {
+                android.util.Log.e(TAG, "rain check failed: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    // ---------------------------------------------------------------- banners
+
+    // One at a time: a banner that arrives while another is up waits its turn.
+    private final java.util.ArrayDeque<Runnable> waiting = new java.util.ArrayDeque<>();
+
     private void showBanner(String glyph, String head, String body, long shownMs) {
+        showBanner(glyph, head, body, shownMs, 0xFF7DDC8A);
+    }
+
+    private void showBanner(String glyph, String head, String body, long shownMs, int headColor) {
         if (!canDraw()) return;
-        if (banner != null) { try { wm.removeView(banner); } catch (RuntimeException ignored) { } }
+        if (banner != null) { waiting.add(() -> showBanner(glyph, head, body, shownMs, headColor)); return; }
         LinearLayout b = new LinearLayout(this);
         b.setGravity(Gravity.CENTER_VERTICAL);
         b.setPadding(dp(16), dp(10), dp(20), dp(10));
@@ -153,7 +293,7 @@ public class OverlayService extends Service {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(dp(12), 0, 0, 0);
-        TextView h = text(12, "sans-serif-medium", 0xFF7DDC8A);
+        TextView h = text(12, "sans-serif-medium", headColor);
         h.setText(head);
         col.addView(h);
         String[] lines = body.split("\n");
@@ -175,6 +315,8 @@ public class OverlayService extends Service {
                 b.animate().alpha(0f).translationY(-dp(24)).setStartDelay(shownMs).setDuration(400).withEndAction(() -> {
                     try { wm.removeView(b); } catch (RuntimeException ignored) { }
                     if (banner == b) banner = null;
+                    Runnable next = waiting.poll();
+                    if (next != null) handler.postDelayed(next, 600);
                 }).start()).start();
     }
 
@@ -184,8 +326,13 @@ public class OverlayService extends Service {
     // on Home, the home screen shows its own full briefing; briefing_day makes sure you only get one a day.
     private final android.content.BroadcastReceiver screenOn = new android.content.BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
+            if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) { stopMusic(); return; } // TV off: radio off too
             handler.removeCallbacks(wakeBriefing);
             handler.postDelayed(wakeBriefing, 4000); // give Home a moment to come back first
+            // Alerts only show while the screen is on, so catch up on anything that came in while it was off.
+            handler.removeCallbacks(feedPoll);
+            handler.postDelayed(feedPoll, 30_000);
+            if (getResources().getBoolean(R.bool.rain_alert)) { handler.removeCallbacks(rainPoll); handler.postDelayed(rainPoll, 30_000); }
         }
     };
     private final Runnable wakeBriefing = this::maybeWakeBriefing;
