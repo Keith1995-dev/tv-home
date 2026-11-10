@@ -505,10 +505,20 @@ public class MainActivity extends Activity {
 
     /** Glass capsule at the top centre; moving focus across it switches views, like Apple TV. */
     private View buildTabs() {
+        FrameLayout frame = new FrameLayout(this);
+        frame.setPadding(dp(3), dp(3), dp(3), dp(3));
+        liquid(frame, dp(16));
+        // One highlight shared by the tabs, sliding (and stretching a little mid-way) to whichever is chosen.
+        tabIndicator = new View(this);
+        tabIndicatorBg = new GradientDrawable();
+        tabIndicatorBg.setCornerRadius(dp(13));
+        tabIndicatorBg.setColor(0x33FFFFFF);
+        tabIndicator.setBackground(tabIndicatorBg);
+        frame.addView(tabIndicator, new FrameLayout.LayoutParams(0, -1));
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(3), dp(3), dp(3), dp(3));
-        liquid(bar, dp(16));
+        frame.addView(bar, new FrameLayout.LayoutParams(-2, -1));
+        bar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> moveTabIndicator(false));
         for (int i = 0; i < TABS.length; i++) {
             int idx = i;
             TextView t = text(11, "sans-serif-medium", 0x99FFFFFF);
@@ -532,17 +542,50 @@ public class MainActivity extends Activity {
             t.setNextFocusRightId(tabViews.get(Math.min(tabViews.size() - 1, i + 1)).getId());
         }
         styleTabs();
-        return bar;
+        return frame;
+    }
+
+    private View tabIndicator;
+    private GradientDrawable tabIndicatorBg;
+    private ValueAnimator tabSlide;
+
+    private void moveTabIndicator(boolean animate) {
+        if (tabIndicator == null || tabViews.isEmpty()) return;
+        int target = tab;
+        boolean focused = false;
+        for (int i = 0; i < tabViews.size(); i++) if (tabViews.get(i).hasFocus()) { target = i; focused = true; }
+        TextView t = tabViews.get(target);
+        if (t.getWidth() == 0) return;
+        tabIndicatorBg.setColor(focused ? 0xF5F4F4F8 : 0x33FFFFFF);
+        float fromX = tabIndicator.getTranslationX(), fromW = tabIndicator.getLayoutParams().width;
+        float toX = t.getLeft(), toW = t.getWidth();
+        if (tabSlide != null) tabSlide.cancel();
+        if (!animate || fromW == 0) { setTabIndicator(toX, toW); return; }
+        tabSlide = ValueAnimator.ofFloat(0f, 1f);
+        tabSlide.setDuration(380);
+        tabSlide.setInterpolator(new android.view.animation.OvershootInterpolator(1.1f));
+        tabSlide.addUpdateListener(a -> {
+            float f = (float) a.getAnimatedValue();
+            float stretch = (float) Math.sin(Math.PI * Math.min(1f, Math.max(0f, f))) * dp(16); // liquid pull
+            setTabIndicator(fromX + (toX - fromX) * f - stretch / 2, fromW + (toW - fromW) * f + stretch);
+        });
+        tabSlide.start();
+    }
+
+    private void setTabIndicator(float x, float w) {
+        tabIndicator.setTranslationX(x);
+        if (tabIndicator.getLayoutParams().width != Math.round(w)) {
+            tabIndicator.getLayoutParams().width = Math.round(w);
+            tabIndicator.requestLayout();
+        }
     }
 
     private void styleTabs() {
+        moveTabIndicator(true);
         for (int i = 0; i < tabViews.size(); i++) {
             TextView t = tabViews.get(i);
             boolean focused = t.hasFocus(), selected = i == tab;
-            GradientDrawable g = new GradientDrawable();
-            g.setCornerRadius(dp(13));
-            g.setColor(focused ? 0xF5F4F4F8 : selected ? 0x33FFFFFF : Color.TRANSPARENT);
-            t.setBackground(g);
+            t.setBackground(null);
             t.setTextColor(focused ? 0xFF111111 : selected ? Color.WHITE : 0x99FFFFFF);
             // Down goes to the top bar on Entertainment; the other views have nothing to select yet.
             t.setNextFocusDownId(tab == 0 && !pills.isEmpty() ? pills.get(0).getId()
@@ -632,6 +675,7 @@ public class MainActivity extends Activity {
                 what.setTextColor(has ? 0xB3111111 : 0xB3FFFFFF);
                 v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f)
                         .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 360 : 220).withLayer().start();
+                depth(v, has, 10);
                 if (has) lastFocusedId = v.getId();
             });
             tile.setOnClickListener(v -> playStation(st[0]));
@@ -838,7 +882,8 @@ public class MainActivity extends Activity {
         shine.setAlpha(0f);
         card.addView(shine, new FrameLayout.LayoutParams(-1, -1));
 
-        box.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        Halo halo = new Halo(this, app.color);
+        box.addView(withHalo(card, halo), new LinearLayout.LayoutParams(-1, -2));
 
         TextView label = text(11, "sans-serif-medium", Color.WHITE);
         label.setText(app.label);
@@ -863,6 +908,8 @@ public class MainActivity extends Activity {
                     .setDuration(has ? 420 : 260).withLayer().start();
             shine.animate().alpha(has ? 1f : 0f).setDuration(160).start();
             label.animate().alpha(has ? 1f : 0f).translationY(has ? dp(4) : 0).setDuration(200).start();
+            halo.show(has);
+            depth(v, has, 12);
             if (!has || !inDock) return;
             lastFocusedId = v.getId();
             onDockFocus(app.pkg, v);
@@ -945,6 +992,7 @@ public class MainActivity extends Activity {
             name.setTextColor(has ? 0xFF333333 : 0xCCFFFFFF);
             v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
                     .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 420 : 260).withLayer().start();
+            depth(v, has, 12);
             if (!has) return;
             lastFocusedId = v.getId();
             title.setText("All apps");
@@ -1676,6 +1724,7 @@ public class MainActivity extends Activity {
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f)
                     .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 300 : 180).withLayer().start();
             shine.animate().alpha(has ? 1f : 0f).setDuration(120).start();
+            depth(v, has, 14);
             t.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             s.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             if (has) {
@@ -3191,6 +3240,7 @@ public class MainActivity extends Activity {
             s.setTextColor(has ? 0x99111111 : 0x99FFFFFF);
             v.animate().scaleX(has ? 1.05f : 1f).scaleY(has ? 1.05f : 1f)
                     .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 300 : 180).withLayer().start();
+            depth(v, has, 8);
         });
         return card;
     }
@@ -4057,6 +4107,95 @@ public class MainActivity extends Activity {
         } catch (SecurityException ignored) { }
         wifiPill.setContentDescription(name);
         wifiPill.setAlpha("Offline".equals(name) ? 0.45f : 1f);
+    }
+
+    // ---------------------------------------------------------------- depth on focus
+
+    // The selected card lifts off the screen (a real shadow under it) and swings in from the side you came from,
+    // settling with a little overshoot. Only the one focused view animates, so it stays cheap on the TV's GPU.
+    private float lostX = Float.NaN, lostY;
+    private final int[] depthLoc = new int[2];
+
+    private void depth(View v, boolean has, float lift) {
+        v.getLocationOnScreen(depthLoc);
+        float cx = depthLoc[0] + v.getWidth() / 2f, cy = depthLoc[1] + v.getHeight() / 2f;
+        if (!has) {
+            lostX = cx;
+            lostY = cy;
+            v.animate().rotationX(0).rotationY(0).translationZ(0).setInterpolator(SOFT).setDuration(220).start();
+            return;
+        }
+        v.setCameraDistance(8000 * getResources().getDisplayMetrics().density);
+        if (v.getOutlineProvider() == ViewOutlineProvider.BACKGROUND) { // glass cards: give the shadow a shape
+            v.setOutlineProvider(new ViewOutlineProvider() {
+                @Override public void getOutline(View view, Outline o) {
+                    o.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(14));
+                    o.setAlpha(1f);
+                }
+            });
+        }
+        float dx = Float.isNaN(lostX) ? 0 : cx - lostX, dy = Float.isNaN(lostX) ? 0 : cy - lostY;
+        lostX = Float.NaN;
+        // Coming from the left, the right edge leads; from below, the top edge leads.
+        if (Math.abs(dx) > Math.abs(dy)) v.setRotationY(dx > 0 ? -9f : 9f);
+        else if (dy != 0) v.setRotationX(dy > 0 ? 7f : -7f);
+        v.animate().rotationX(0).rotationY(0).translationZ(dp(lift))
+                .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f)).setDuration(520).start();
+    }
+
+    /** A soft oval of the app's own colour that spills out from behind its tile while the tile is focused. */
+    private static final class Halo extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int color;
+
+        Halo(Context c, int color) {
+            super(c);
+            this.color = color;
+            setAlpha(0f);
+            setScaleX(0.85f);
+            setScaleY(0.85f);
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+            paint.setShader(new android.graphics.RadialGradient(w / 2f, h / 2f, w / 2f,
+                    // Strong right up to the tile's edge (about 60% out), then a soft falloff past it.
+                    new int[]{withAlpha(color, 0.95f), withAlpha(color, 0.8f), withAlpha(color, 0.35f), Color.TRANSPARENT},
+                    new float[]{0f, 0.6f, 0.8f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            c.save();
+            c.scale(1f, h / w, w / 2f, h / 2f); // circle squashed to the tile's shape
+            c.drawCircle(w / 2f, h / 2f, w / 2f, paint);
+            c.restore();
+        }
+
+        void show(boolean has) {
+            animate().alpha(has ? 1f : 0f).scaleX(has ? 1f : 0.85f).scaleY(has ? 1f : 0.85f)
+                    .setDuration(has ? 420 : 240).start();
+        }
+    }
+
+    /** Wraps a tile so its halo can sit behind it and reach past its edges. */
+    private FrameLayout withHalo(View card, Halo halo) {
+        FrameLayout holder = new FrameLayout(this);
+        holder.setClipChildren(false);
+        holder.setClipToPadding(false);
+        // Sized from the tile once it's laid out; the negative margins keep it out of the holder's own size.
+        int padX = dp(34), padY = dp(26);
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(0, 0);
+        hp.setMargins(-padX, -padY, -padX, -padY);
+        holder.addView(halo, hp);
+        holder.addView(card, new FrameLayout.LayoutParams(-1, -2));
+        card.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int w = r - l + 2 * padX, h = b - t + 2 * padY;
+            if (hp.width == w && hp.height == h) return;
+            hp.width = w;
+            hp.height = h;
+            halo.post(halo::requestLayout);
+        });
+        return holder;
     }
 
     // ---------------------------------------------------------------- glow
