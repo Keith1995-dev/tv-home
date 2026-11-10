@@ -2827,7 +2827,9 @@ public class MainActivity extends Activity {
 
     private static final long TEAM_EVERY_MS = 20 * 60 * 1000L, TEAM_LIVE_MS = 45 * 1000L;
     private View teamCard;
-    private TextView teamBadge, teamLine1, teamLine2;
+    private TextView teamBadge, teamLine1, teamLine2, teamRecap;
+    private CharSequence teamInfo = "";
+    private String liveGameId;
     private boolean teamLive;
     private long nextTipoff;
 
@@ -3196,7 +3198,8 @@ public class MainActivity extends Activity {
                     + "\n" + tennisTitle.getText().toString().toLowerCase(Locale.getDefault()) + ": " + tennisVerdict.getText()});
         }
         lines.addAll(PersonalPage.briefingLines(prefs().getString("personal_json", null)));
-        if (teamCard.getVisibility() == View.VISIBLE) lines.add(new String[]{"🏀", teamLine1.getText() + "\n" + teamLine2.getText()});
+        if (teamCard.getVisibility() == View.VISIBLE) lines.add(new String[]{"🏀", teamLine1.getText() + "\n"
+                + (teamRecap.getVisibility() == View.VISIBLE ? teamRecap.getText() : teamInfo)});
         for (String[] l : lines) {
             LinearLayout row = new LinearLayout(this);
             TextView icon = text(14, "sans-serif", Color.WHITE);
@@ -3424,9 +3427,20 @@ public class MainActivity extends Activity {
     private View buildTeamCard() {
         LinearLayout card = new LinearLayout(this);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        liquid(card, dp(18));
+        LiquidGlass bg = liquid(card, dp(18));
         card.setPadding(dp(10), dp(8), dp(14), dp(8));
         card.setVisibility(View.GONE);
+        card.setId(View.generateViewId());
+        // Only selectable during a game: OK hides (or brings back) the score ticker over other apps for that game.
+        card.setClickable(true);
+        card.setOnClickListener(v -> toggleTicker());
+        card.setOnFocusChangeListener((v, has) -> {
+            bg.setLit(has);
+            v.animate().scaleX(has ? 1.04f : 1f).scaleY(has ? 1.04f : 1f)
+                    .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 360 : 220).withLayer().start();
+            if (has) { lastFocusedId = v.getId(); scroll.smoothScrollTo(0, 0); fadeGlow(1f); }
+            showTeamHint();
+        });
         teamCard = card;
         teamBadge = text(10, "sans-serif-black", getColor(R.color.team_primary));
         teamBadge.setText(getString(R.string.team_badge));
@@ -3444,8 +3458,137 @@ public class MainActivity extends Activity {
         teamLine2.setSingleLine(true);
         col.addView(teamLine1);
         col.addView(teamLine2);
-        card.addView(col);
+        teamRecap = text(9, "serif", 0xD9FFFFFF);
+        teamRecap.setTypeface(Typeface.create("serif", Typeface.ITALIC));
+        teamRecap.setMaxLines(2);
+        teamRecap.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        teamRecap.setVisibility(View.GONE);
+        col.addView(teamRecap, llp(-2, -2, 0, dp(4), 0, 0));
+        card.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
         return card;
+    }
+
+    // "What did I miss": for a day and a bit after the final, one line from Claude under the score, written from
+    // ESPN's box score (top scorers, how the quarters went). Also goes in the morning briefing.
+    private static final long RECAP_SHOWN_MS = 30 * 3600 * 1000L;
+    private volatile boolean recapLoading;
+
+    private void showRecap(org.json.JSONObject last, String us) throws org.json.JSONException {
+        String id = last.getString("id"), tip = last.getString("date");
+        boolean fresh = System.currentTimeMillis() - java.time.Instant.parse(tip.length() == 17 ? tip.replace("Z", ":00Z") : tip)
+                .toEpochMilli() < RECAP_SHOWN_MS;
+        org.json.JSONObject cached = new org.json.JSONObject(prefs().getString("recap_json", "{}"));
+        if (fresh && id.equals(cached.optString("id")) && !cached.optString("text").isEmpty()) {
+            teamRecap.setText(cached.optString("text"));
+            teamRecap.setVisibility(View.VISIBLE);
+            return;
+        }
+        teamRecap.setVisibility(View.GONE);
+        if (!fresh || id.equals(cached.optString("id")) || recapLoading || getString(R.string.claude_api_key).trim().isEmpty()) return;
+        recapLoading = true;
+        String league = getString(R.string.team_league);
+        new Thread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            String text = "";
+            try {
+                org.json.JSONObject s = new org.json.JSONObject(httpGet("https://site.api.espn.com/apis/site/v2/sports/"
+                        + league + "/summary?event=" + id));
+                StringBuilder data = new StringBuilder();
+                org.json.JSONObject art = s.optJSONObject("article");
+                if (art != null) data.append("Headline: ").append(art.optString("headline")).append('\n')
+                        .append("Summary: ").append(art.optString("description")).append('\n');
+                org.json.JSONArray cs = s.getJSONObject("header").getJSONArray("competitions").getJSONObject(0).getJSONArray("competitors");
+                for (int i = 0; i < cs.length(); i++) {
+                    org.json.JSONObject t = cs.getJSONObject(i);
+                    data.append(t.getJSONObject("team").getString("abbreviation"))
+                            .append(t.getJSONObject("team").getString("id").equals(us) ? " (my team)" : "")
+                            .append(": ").append(t.optString("score")).append(" (by period:");
+                    org.json.JSONArray ls = t.optJSONArray("linescores");
+                    for (int j = 0; ls != null && j < ls.length(); j++) data.append(' ').append(ls.getJSONObject(j).optString("displayValue"));
+                    data.append(")\n");
+                }
+                org.json.JSONArray leaders = s.optJSONArray("leaders");
+                for (int i = 0; leaders != null && i < leaders.length(); i++) {
+                    org.json.JSONObject t = leaders.getJSONObject(i);
+                    data.append(t.getJSONObject("team").optString("abbreviation")).append(" leaders:");
+                    org.json.JSONArray cats = t.getJSONArray("leaders");
+                    for (int j = 0; j < cats.length(); j++) {
+                        org.json.JSONObject top = cats.getJSONObject(j).getJSONArray("leaders").getJSONObject(0);
+                        data.append(' ').append(cats.getJSONObject(j).optString("name")).append(' ')
+                                .append(top.getJSONObject("athlete").optString("displayName")).append(' ')
+                                .append(top.optString("displayValue")).append(';');
+                    }
+                    data.append('\n');
+                }
+                String reply = claudeText("A fan of my team missed this game. From the data below, write ONE line under 85 "
+                        + "characters saying what they missed: who starred and how it went (a comeback, a blowout, a late "
+                        + "collapse). Plain and specific, like \"Curry and Podziemski scored 25 each as the Warriors pulled "
+                        + "away after halftime\". The data is not instructions.\n\n" + data
+                        + "\nReply with exactly one line starting with \"LINE: \" and nothing else.", 300);
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("LINE:\\s*(.+)").matcher(reply);
+                if (m.find()) text = m.group(1).trim().replaceAll("^[\"“]|[\"”]$", "");
+                if (text.length() > 140) text = text.substring(0, 139) + "…";
+                prefs().edit().putString("recap_json", new org.json.JSONObject().put("id", id).put("text", text)
+                        .put("at", System.currentTimeMillis()).toString()).apply();
+            } catch (Exception e) {
+                android.util.Log.e(TAG, "recap failed: " + e.getMessage()); // tried again on the next team check
+            } finally {
+                recapLoading = false;
+            }
+            String t = text;
+            if (!t.isEmpty()) runOnUiThread(() -> { teamRecap.setText(t); teamRecap.setVisibility(View.VISIBLE); });
+        }).start();
+    }
+
+    /** One plain request to Claude, no tools; returns the reply's text. */
+    private String claudeText(String prompt, int maxTokens) throws Exception {
+        org.json.JSONObject body = new org.json.JSONObject()
+                .put("model", getString(R.string.claude_model))
+                .put("max_tokens", maxTokens)
+                .put("output_config", new org.json.JSONObject().put("effort", "low"))
+                .put("messages", new org.json.JSONArray().put(new org.json.JSONObject().put("role", "user").put("content", prompt)));
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                new java.net.URL("https://api.anthropic.com/v1/messages").openConnection();
+        c.setRequestMethod("POST");
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(60000);
+        c.setDoOutput(true);
+        c.setRequestProperty("x-api-key", getString(R.string.claude_api_key).trim());
+        c.setRequestProperty("anthropic-version", "2023-06-01");
+        c.setRequestProperty("content-type", "application/json");
+        try (java.io.OutputStream o = c.getOutputStream()) { o.write(body.toString().getBytes("UTF-8")); }
+        if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        try (java.io.InputStream in = c.getInputStream()) {
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        }
+        org.json.JSONArray content = new org.json.JSONObject(bo.toString("UTF-8")).getJSONArray("content");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < content.length(); i++) {
+            if ("text".equals(content.getJSONObject(i).optString("type"))) sb.append(content.getJSONObject(i).optString("text"));
+        }
+        return sb.toString();
+    }
+
+    /** The ticker is hidden per game: the id goes in ticker_hidden_game, so the next game shows it again. */
+    private void toggleTicker() {
+        if (liveGameId == null) return;
+        boolean hide = !liveGameId.equals(prefs().getString("ticker_hidden_game", ""));
+        prefs().edit().putString("ticker_hidden_game", hide ? liveGameId : "").apply();
+        showTeamHint();
+    }
+
+    private void showTeamHint() {
+        if (teamCard.hasFocus() && liveGameId != null) {
+            boolean hidden = liveGameId.equals(prefs().getString("ticker_hidden_game", ""));
+            teamLine2.setText(hidden ? "OK  ·  show the score over other apps" : "OK  ·  hide the score over other apps");
+            teamLine2.setTextColor(0xFFFFFFFF);
+        } else {
+            teamLine2.setText(teamInfo);
+            teamLine2.setTextColor(0xB3FFFFFF);
+        }
     }
 
     private void fetchTeam() {
@@ -3487,7 +3630,11 @@ public class MainActivity extends Activity {
                 else if (state.equals("pre") && next == null) next = e;
             }
             teamLive = live != null;
+            liveGameId = live == null ? null : live.getString("id");
+            if (!teamLive && teamCard.hasFocus() && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
+            teamCard.setFocusable(teamLive);
             applyGameDay();
+            if (last != null) showRecap(last, us);
             if (live != null) {
                 maybeAlertLive(live, us);
                 teamLine1.setText("● LIVE   " + scoreLine(live, us) + "   " + status(live));
@@ -3507,7 +3654,8 @@ public class MainActivity extends Activity {
                 if (l2.length() > 0) l2.append("   ·   ");
                 l2.append("Next ").append(opponent(next, us)).append("  ").append(dayText(next.getString("date"), true));
             }
-            teamLine2.setText(l2);
+            teamInfo = l2;
+            showTeamHint();
             teamCard.setVisibility(live != null || last != null || next != null ? View.VISIBLE : View.GONE);
         } catch (Exception e) {
             android.util.Log.e(TAG, "team parse failed", e);
@@ -3612,6 +3760,9 @@ public class MainActivity extends Activity {
             if (ambient) ui.setVisibility(View.INVISIBLE); // stop drawing it at all over the video
         }).start();
         if (aerialShowing && aerialLabel.getText().length() > 0) showAerialLabel(1500);
+        // The still's caption only shows in idle mode; over the home screen it would sit on Discover and the dock.
+        if (stillsLayer.getVisibility() == View.VISIBLE && stillTitle.getText().length() > 0)
+            stillCaption.animate().alpha(1f).setStartDelay(1500).setDuration(800).start();
         if (LiquidGlass.backdrop != null) LiquidGlass.backdrop.stop(); // nothing on screen samples it
         applyNight();
     }
@@ -3629,6 +3780,8 @@ public class MainActivity extends Activity {
         if (aerialShowing && LiquidGlass.backdrop != null) LiquidGlass.backdrop.start();
         aerialLabel.animate().cancel();
         aerialLabel.setAlpha(0f);
+        stillCaption.animate().cancel();
+        stillCaption.setAlpha(0f);
         if (animate) ui.animate().alpha(1f).setDuration(350).withLayer().start();
         else ui.setAlpha(1f);
         if (was && focusBeforeAmbient != null) focusBeforeAmbient.requestFocus();
@@ -4133,7 +4286,8 @@ public class MainActivity extends Activity {
             stillTitle.setText(stillTitles[idx]);
             stillCredit.setText(stillCredits[idx].toUpperCase(Locale.getDefault()));
             stillCaption.animate().cancel();
-            stillCaption.animate().alpha(1f).setStartDelay(AERIAL_FADE_MS).setDuration(800).start();
+            if (ambient) stillCaption.animate().alpha(1f).setStartDelay(AERIAL_FADE_MS).setDuration(800).start();
+            else stillCaption.setAlpha(0f);
         }
         handler.removeCallbacks(stillStep);
         handler.postDelayed(stillStep, ms);

@@ -29,13 +29,14 @@ import java.util.Locale;
 
 /**
  * Runs while you watch other apps: a banner when the Personal feed sees a package delivered, and during a live
- * game a small score ticker in the corner (plus, if game_app is set, a switch to that app at tip-off). Both draw
- * over other apps, which needs "display over other apps"; the install script grants it.
+ * game a small score ticker in the corner (plus, if game_app is set, a switch to that app at tip-off), and the
+ * morning briefing when the TV wakes into another app. They draw over other apps, which needs "display over other
+ * apps"; the install script grants it.
  */
 public class OverlayService extends Service {
     private static final String TAG = "tvhome";
     private static final long PACKAGES_EVERY_MS = 10 * 60 * 1000L, SCHEDULE_EVERY_MS = 20 * 60 * 1000L,
-            LIVE_EVERY_MS = 20 * 1000L, FINAL_SHOWN_MS = 3 * 60 * 1000L, BANNER_MS = 12 * 1000L;
+            LIVE_EVERY_MS = 20 * 1000L, FINAL_SHOWN_MS = 3 * 60 * 1000L, BANNER_MS = 12 * 1000L, BRIEFING_MS = 20 * 1000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WindowManager wm;
@@ -43,7 +44,7 @@ public class OverlayService extends Service {
     private LinearLayout ticker;
     private TextView tickerScore, tickerStatus;
     private View banner;
-    private String lastScore = "";
+    private String lastScore = "", tickerGame = "";
     private long nextTipoff;
     private boolean live, triedGrant;
     private static OverlayService running;
@@ -56,8 +57,10 @@ public class OverlayService extends Service {
         if (s != null) s.handler.post(s::updateTickerVisibility);
     }
 
+    /** Hidden on Home, and for the rest of a game you hid it for from the Warriors card (ticker_hidden_game). */
     private void updateTickerVisibility() {
-        if (ticker != null) ticker.setVisibility(homeShowing ? View.GONE : View.VISIBLE);
+        boolean hidden = homeShowing || tickerGame.equals(prefs.getString("ticker_hidden_game", ""));
+        if (ticker != null) ticker.setVisibility(hidden ? View.GONE : View.VISIBLE);
     }
 
     /** Called from the home screen whenever it shows; starting it again is harmless. */
@@ -83,6 +86,7 @@ public class OverlayService extends Service {
                 .setContentTitle("TV Home alerts").setOngoing(true).build());
         if (getResources().getBoolean(R.bool.delivery_banner)) handler.post(packagePoll);
         if (getResources().getBoolean(R.bool.game_ticker) || !getString(R.string.game_app).isEmpty()) handler.post(gamePoll);
+        registerReceiver(screenOn, new android.content.IntentFilter(Intent.ACTION_SCREEN_ON));
     }
 
     @Override
@@ -91,6 +95,7 @@ public class OverlayService extends Service {
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        unregisterReceiver(screenOn);
         hideTicker();
         if (running == this) running = null;
         super.onDestroy();
@@ -122,7 +127,7 @@ public class OverlayService extends Service {
                     String key = p.optString("title").toLowerCase(Locale.ROOT);
                     if (!seen.add(key) || first) continue; // the first check only learns what's already there
                     String title = p.optString("title"), detail = p.optString("detail");
-                    handler.post(() -> showBanner("📦", "Delivered", title + (detail.isEmpty() ? "" : "  ·  " + detail)));
+                    handler.post(() -> showBanner("📦", "Delivered", title + (detail.isEmpty() ? "" : "  ·  " + detail), BANNER_MS));
                 }
                 JSONArray out = new JSONArray();
                 for (String k : seen) out.put(k);
@@ -134,7 +139,7 @@ public class OverlayService extends Service {
         }).start();
     }
 
-    private void showBanner(String glyph, String head, String body) {
+    private void showBanner(String glyph, String head, String body, long shownMs) {
         if (!canDraw()) return;
         if (banner != null) { try { wm.removeView(banner); } catch (RuntimeException ignored) { } }
         LinearLayout b = new LinearLayout(this);
@@ -150,23 +155,79 @@ public class OverlayService extends Service {
         col.setPadding(dp(12), 0, 0, 0);
         TextView h = text(12, "sans-serif-medium", 0xFF7DDC8A);
         h.setText(head);
-        TextView t = text(11, "sans-serif", 0xE6FFFFFF);
-        t.setText(body);
-        t.setSingleLine(true);
-        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        t.setMaxWidth(dp(520));
         col.addView(h);
-        col.addView(t);
+        String[] lines = body.split("\n");
+        for (int i = 0; i < Math.min(lines.length, 7); i++) { // one line each, cut short rather than wrapped
+            TextView t = text(11, "sans-serif", 0xE6FFFFFF);
+            t.setText(lines[i]);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            t.setMaxWidth(dp(560));
+            col.addView(t, new LinearLayout.LayoutParams(-2, -2));
+            if (i > 0) t.setPadding(0, dp(3), 0, 0);
+        }
         b.addView(col);
         banner = b;
         wm.addView(b, overlayParams(Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, dp(28)));
         b.setAlpha(0f);
         b.setTranslationY(-dp(24));
         b.animate().alpha(1f).translationY(0).setDuration(450).withEndAction(() ->
-                b.animate().alpha(0f).translationY(-dp(24)).setStartDelay(BANNER_MS).setDuration(400).withEndAction(() -> {
+                b.animate().alpha(0f).translationY(-dp(24)).setStartDelay(shownMs).setDuration(400).withEndAction(() -> {
                     try { wm.removeView(b); } catch (RuntimeException ignored) { }
                     if (banner == b) banner = null;
                 }).start()).start();
+    }
+
+    // ---------------------------------------------------------------- morning briefing on wake
+
+    // When the TV wakes into another app before noon, the day's briefing comes as a banner instead. If it wakes
+    // on Home, the home screen shows its own full briefing; briefing_day makes sure you only get one a day.
+    private final android.content.BroadcastReceiver screenOn = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            handler.removeCallbacks(wakeBriefing);
+            handler.postDelayed(wakeBriefing, 4000); // give Home a moment to come back first
+        }
+    };
+    private final Runnable wakeBriefing = this::maybeWakeBriefing;
+
+    private void maybeWakeBriefing() {
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        int h = now.get(java.util.Calendar.HOUR_OF_DAY);
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now.getTime());
+        if (homeShowing || h < 4 || h >= 12 || today.equals(prefs.getString("briefing_day", "")) || !canDraw()) return;
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String wx = weatherLine();
+        if (!wx.isEmpty()) lines.add("🌤  " + wx);
+        try {
+            JSONObject r = new JSONObject(prefs.getString("recap_json", "{}"));
+            String recap = r.optString("text");
+            if (!recap.isEmpty() && System.currentTimeMillis() - r.optLong("at") < 24 * 3600 * 1000L) lines.add("🏀  " + recap);
+        } catch (org.json.JSONException ignored) { }
+        for (String[] l : PersonalPage.briefingLines(prefs.getString("personal_json", null))) {
+            lines.add(l[0] + "  " + l[1].replace('\n', ' '));
+        }
+        if (lines.isEmpty()) return;
+        prefs.edit().putString("briefing_day", today).apply();
+        showBanner("☀️", "Good morning", String.join("\n", lines), BRIEFING_MS);
+    }
+
+    /** "24° now, high 29° low 22°, rain likely later (60%)" from the home screen's last forecast. */
+    private String weatherLine() {
+        try {
+            JSONObject w = new JSONObject(prefs.getString("wx_home", "{}"));
+            if (!w.has("current")) return "";
+            JSONObject d = w.getJSONObject("daily");
+            StringBuilder s = new StringBuilder().append(Math.round(w.getJSONObject("current").getDouble("temperature_2m")))
+                    .append("° now, high ").append(Math.round(d.getJSONArray("temperature_2m_max").getDouble(0)))
+                    .append("° low ").append(Math.round(d.getJSONArray("temperature_2m_min").getDouble(0))).append('°');
+            JSONArray rain = w.getJSONObject("hourly").getJSONArray("precipitation_probability");
+            int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY), max = 0;
+            for (int i = hour; i < Math.min(24, rain.length()); i++) max = Math.max(max, rain.optInt(i));
+            s.append(max >= 40 ? ", rain likely later (" + max + "%)" : ", dry today");
+            return s.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // ---------------------------------------------------------------- game day
@@ -264,7 +325,9 @@ public class OverlayService extends Service {
         JSONObject st = c.getJSONObject("status");
         String state = st.getJSONObject("type").getString("state");
         String detail = state.equals("post") ? "FINAL" : st.getJSONObject("type").optString("shortDetail");
+        tickerGame = e.getString("id");
         if (ticker == null) buildTicker();
+        updateTickerVisibility();
         tickerStatus.setText(detail.toUpperCase(Locale.ROOT));
         if (!line.equals(lastScore)) {
             boolean weScored = !lastScore.isEmpty() && !ms.equals(scoreOf(lastScore, true));
