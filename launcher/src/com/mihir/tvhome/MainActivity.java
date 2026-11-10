@@ -673,9 +673,7 @@ public class MainActivity extends Activity {
                 bg.setLit(has);
                 name.setTextColor(has ? 0xFF111111 : Color.WHITE);
                 what.setTextColor(has ? 0xB3111111 : 0xB3FFFFFF);
-                v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f)
-                        .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 360 : 220).withLayer().start();
-                depth(v, has, 10);
+                depth(v, has, 10, 1.06f);
                 if (has) lastFocusedId = v.getId();
             });
             tile.setOnClickListener(v -> playStation(st[0]));
@@ -902,14 +900,10 @@ public class MainActivity extends Activity {
         });
         card.setOnLongClickListener(v -> { showAppMenu(v, app); return true; });
         card.setOnFocusChangeListener((v, has) -> {
-            float s = has ? (inDock ? 1.12f : 1.1f) : 1f;
-            v.animate().scaleX(s).scaleY(s)
-                    .setInterpolator(has ? SPRING : SOFT)
-                    .setDuration(has ? 420 : 260).withLayer().start();
             shine.animate().alpha(has ? 1f : 0f).setDuration(160).start();
             label.animate().alpha(has ? 1f : 0f).translationY(has ? dp(4) : 0).setDuration(200).start();
             halo.show(has);
-            depth(v, has, 12);
+            depth(v, has, 12, inDock ? 1.12f : 1.1f);
             if (!has || !inDock) return;
             lastFocusedId = v.getId();
             onDockFocus(app.pkg, v);
@@ -990,9 +984,7 @@ public class MainActivity extends Activity {
             bg.setLit(has);
             icon.setTextColor(has ? 0xFF111111 : Color.WHITE);
             name.setTextColor(has ? 0xFF333333 : 0xCCFFFFFF);
-            v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
-                    .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 420 : 260).withLayer().start();
-            depth(v, has, 12);
+            depth(v, has, 12, 1.12f);
             if (!has) return;
             lastFocusedId = v.getId();
             title.setText("All apps");
@@ -1721,10 +1713,8 @@ public class MainActivity extends Activity {
         poster.setOnLongClickListener(v -> { toggleSeen(it); return true; });
         posterByKey.put(recKey(it), poster);
         poster.setOnFocusChangeListener((v, has) -> {
-            v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f)
-                    .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 300 : 180).withLayer().start();
             shine.animate().alpha(has ? 1f : 0f).setDuration(120).start();
-            depth(v, has, 14);
+            depth(v, has, 14, 1.1f);
             t.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             s.animate().translationY(has ? dp(8) : 0).setDuration(180).start();
             if (has) {
@@ -3238,9 +3228,7 @@ public class MainActivity extends Activity {
             bg.setLit(has);
             t.setTextColor(has ? 0xFF111111 : Color.WHITE);
             s.setTextColor(has ? 0x99111111 : 0x99FFFFFF);
-            v.animate().scaleX(has ? 1.05f : 1f).scaleY(has ? 1.05f : 1f)
-                    .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 300 : 180).withLayer().start();
-            depth(v, has, 8);
+            depth(v, has, 8, 1.05f);
         });
         return card;
     }
@@ -4113,16 +4101,22 @@ public class MainActivity extends Activity {
 
     // The selected card lifts off the screen (a real shadow under it) and swings in from the side you came from,
     // settling with a little overshoot. Only the one focused view animates, so it stays cheap on the TV's GPU.
+    private static final android.animation.TimeInterpolator FOCUS_POP = new android.view.animation.OvershootInterpolator(1.2f);
     private float lostX = Float.NaN, lostY;
     private final int[] depthLoc = new int[2];
 
-    private void depth(View v, boolean has, float lift) {
+    /**
+     * Grow, lift and settle the focused view in ONE animation drawn from a GPU layer (separate animations for
+     * scale and tilt fought each other and stuttered on this TV). Replaces the callers' own scale animation.
+     */
+    private void depth(View v, boolean has, float lift, float scale) {
         v.getLocationOnScreen(depthLoc);
         float cx = depthLoc[0] + v.getWidth() / 2f, cy = depthLoc[1] + v.getHeight() / 2f;
         if (!has) {
             lostX = cx;
             lostY = cy;
-            v.animate().rotationX(0).rotationY(0).translationZ(0).setInterpolator(SOFT).setDuration(220).start();
+            v.animate().scaleX(1f).scaleY(1f).rotationX(0).rotationY(0).translationZ(0)
+                    .setInterpolator(SOFT).setDuration(220).withLayer().start();
             return;
         }
         v.setCameraDistance(8000 * getResources().getDisplayMetrics().density);
@@ -4137,10 +4131,13 @@ public class MainActivity extends Activity {
         float dx = Float.isNaN(lostX) ? 0 : cx - lostX, dy = Float.isNaN(lostX) ? 0 : cy - lostY;
         lostX = Float.NaN;
         // Coming from the left, the right edge leads; from below, the top edge leads.
-        if (Math.abs(dx) > Math.abs(dy)) v.setRotationY(dx > 0 ? -9f : 9f);
-        else if (dy != 0) v.setRotationX(dy > 0 ? 7f : -7f);
-        v.animate().rotationX(0).rotationY(0).translationZ(dp(lift))
-                .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f)).setDuration(520).start();
+        v.animate().cancel();
+        if (Math.abs(dx) > Math.abs(dy)) v.setRotationY(dx > 0 ? -5f : 5f);
+        else if (dy != 0) v.setRotationX(dy > 0 ? 4f : -4f);
+        // One gentle overshoot, no wobble: at the ~30 fps this TV draws the home screen, a spring's back-and-forth
+        // reads as a shudder.
+        v.animate().scaleX(scale).scaleY(scale).rotationX(0).rotationY(0).translationZ(dp(lift))
+                .setInterpolator(FOCUS_POP).setDuration(450).withLayer().start();
     }
 
     /** A soft oval of the app's own colour that spills out from behind its tile while the tile is focused. */
@@ -4172,8 +4169,9 @@ public class MainActivity extends Activity {
         }
 
         void show(boolean has) {
+            // From a GPU layer: the gradient is drawn once, then only faded and scaled.
             animate().alpha(has ? 1f : 0f).scaleX(has ? 1f : 0.85f).scaleY(has ? 1f : 0.85f)
-                    .setDuration(has ? 420 : 240).start();
+                    .setDuration(has ? 420 : 240).withLayer().start();
         }
     }
 
