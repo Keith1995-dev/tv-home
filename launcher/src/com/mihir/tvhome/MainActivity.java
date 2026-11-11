@@ -53,6 +53,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -410,8 +411,7 @@ public class MainActivity extends Activity {
             recsJump = true;
             loadRecs(true);
         });
-        moodPill = pill("Moods", "◐");
-        moodPill.setOnClickListener(v -> showMoods(v));
+        moodPill = buildMoodPill();
         List<TextView> row = new ArrayList<>(Arrays.asList(inputs, saver, moodPill, picks, wifiPill, settings, update));
         if (isInstalled(GOOGLE_TV)) {
             TextView gtv = pill("Google TV", "▣");
@@ -1184,97 +1184,338 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- room moods
 
     // A mood sets every light in the room (RoomLights) until another is picked, Lights off, or the TV goes off.
-    private TextView moodPill;
+    // The panel ("Room Ambience") is only the look: the lighting commands live in RoomLights.MOODS.
 
-    /** The swatch colour for a mood colour: #RRGGBB as is, kNNNN whites as a warm-to-cool tint. */
-    private static int moodColour(String c) {
-        if (!c.startsWith("k")) return Color.parseColor(c);
-        int k = Integer.parseInt(c.substring(1));
-        return k <= 2500 ? 0xFFFFB46B : k <= 3500 ? 0xFFFFD6A6 : k <= 4500 ? 0xFFFFE9D2 : 0xFFEEF2FF;
+    /** How each mood looks on screen: gradient stops (lightest corner first), its glow colour, and its icon. */
+    private static final class MoodLook {
+        final int[] stops;
+        final int accent;
+        final String icon;
+        MoodLook(int accent, String icon, int... stops) { this.stops = stops; this.accent = accent; this.icon = icon; }
     }
 
-    private void updateMoodPill() {
+    private static MoodLook look(String id) {
+        switch (id == null ? "off" : id) {
+            case "action": return new MoodLook(0xFF8A3CFF, "bolt", 0xFF1E3CFF, 0xFF7B2CFF, 0xFFFF2A3D);
+            case "romance": return new MoodLook(0xFFFF4FA3, "heart", 0xFFFF6FBA, 0xFFD62AD0, 0xFF7B3DFF);
+            case "chill": return new MoodLook(0xFF19D3E0, "waves", 0xFF4BF5E8, 0xFF14B8C8, 0xFF1F3FD6);
+            case "cozy": return new MoodLook(0xFFFF9A2E, "sunset", 0xFFFFD66B, 0xFFFF9A2E, 0xFFD9601A);
+            case "party": return new MoodLook(0xFFC03CFF, "sparkle", 0xFFFF2BD6, 0xFF7B3DFF, 0xFF23E5FF, 0xFF39FF9A);
+            case "horror": return new MoodLook(0xFFD0122E, "ghost", 0xFF1A0008, 0xFF9E0019, 0xFF3E0A63);
+            case "focus": return new MoodLook(0xFFFFF1DC, "book", 0xFFFFFFFF, 0xFFF6EEE3, 0xFFD9E1EE);
+            default: return new MoodLook(0xFFB8BEC8, "power", 0xFF30333C, 0xFF17191F);
+        }
+    }
+
+    private TextView moodPill;
+    private LiquidGlass moodPillGlass;
+
+    /** The top-bar button: glass like the others, or the running mood's own gradient. */
+    private TextView buildMoodPill() {
+        TextView p = text(10, "sans-serif-medium", 0xE6FFFFFF);
+        p.setGravity(Gravity.CENTER);
+        p.setPadding(dp(12), 0, dp(12), 0);
+        p.setFocusable(true);
+        p.setId(View.generateViewId());
+        moodPillGlass = new LiquidGlass(p, dp(PILL_H / 2f));
+        p.setOnClickListener(v -> showMoods(v));
+        p.setOnFocusChangeListener((v, has) -> {
+            styleMoodPill();
+            v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f)
+                    .setInterpolator(has ? SPRING : SOFT).setDuration(has ? 360 : 220).withLayer().start();
+            if (has) { lastFocusedId = v.getId(); scroll.smoothScrollTo(0, 0); fadeGlow(1f); }
+        });
+        moodPill = p;
+        styleMoodPill();
+        return p;
+    }
+
+    private void updateMoodPill() { styleMoodPill(); }
+
+    private void styleMoodPill() {
         String id = OverlayService.currentMood;
         String[] m = id == null ? null : RoomLights.find(id);
+        boolean focused = moodPill.hasFocus() && moodPanel == null; // the panel has the remote while it's open
         moodPill.setText("◐  " + (m == null ? "Moods" : m[1]));
+        if (m == null) {
+            moodPill.setBackground(moodPillGlass);
+            moodPillGlass.setLit(focused);
+            moodPill.setTextColor(focused ? 0xFF111111 : 0xE6FFFFFF);
+            moodPill.setShadowLayer(0, 0, 0, 0);
+        } else {
+            MoodLook l = look(id);
+            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, l.stops.length > 1 ? l.stops : new int[]{l.stops[0], l.stops[0]});
+            g.setCornerRadius(dp(PILL_H / 2f));
+            g.setStroke(focused ? dp(2) : dp(1), focused ? 0xF2FFFFFF : 0x40FFFFFF);
+            moodPill.setBackground(g);
+            boolean light = "focus".equals(id);
+            moodPill.setTextColor(light ? 0xFF1E2128 : Color.WHITE);
+            moodPill.setShadowLayer(light ? 0 : dp(3), 0, dp(1), 0x66000000);
+        }
     }
 
+    private PopupWindow moodPanel;
+    private final List<MoodCard> moodCards = new ArrayList<>();
+    private TextView moodStatus;
+    private View brightRow, brightFill;
+    private TextView brightValue, brightHint;
+
+    private static final class MoodCard {
+        String id; // null = Lights off
+        View card;
+        Halo halo;
+        View badge;
+        GradientDrawable bg;
+        TextView label;
+    }
+
+    /** "Room Ambience": eight lighting scenes in a 4 × 2 grid, the running one glowing, and its brightness. */
     private void showMoods(View anchor) {
+        moodCards.clear();
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(10), dp(12), dp(12));
-        box.setBackground(glass(dp(20), GLASS_DARK));
-        TextView head = text(9, "sans-serif-medium", 0x99FFFFFF);
-        head.setLetterSpacing(0.22f);
-        head.setText("ROOM MOOD");
-        box.addView(head, llp(-2, -2, dp(4), 0, 0, dp(8)));
-        PopupWindow pw = new PopupWindow(box, -2, -2, true);
-        List<View> tiles = new ArrayList<>();
+        box.setClipChildren(false);
+        box.setClipToPadding(false);
+        box.setPadding(dp(18), dp(16), dp(18), dp(18));
+        // Opaque, so the busy background never shows through the text.
+        GradientDrawable panel = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFF1B1D24, 0xFF0F1015});
+        panel.setCornerRadius(dp(26));
+        panel.setStroke(dp(1), 0x24FFFFFF);
+        box.setBackground(panel);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text(17, "sans-serif-medium", Color.WHITE);
+        title.setText("Room Ambience");
+        TextView sub = text(10, "sans-serif", 0x8CFFFFFF);
+        sub.setText("Set the perfect atmosphere");
+        titles.addView(title);
+        titles.addView(sub, llp(-2, -2, 0, dp(1), 0, 0));
+        head.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        moodStatus = text(10, "sans-serif-medium", Color.WHITE);
+        moodStatus.setPadding(dp(11), dp(5), dp(12), dp(5));
+        head.addView(moodStatus, llp(-2, -2, dp(12), 0, 0, 0));
+        box.addView(head, llp(-1, -2, dp(2), 0, dp(2), dp(14)));
+
+        List<String> ids = new ArrayList<>();
+        for (String[] m : RoomLights.MOODS) ids.add(m[0]);
+        ids.add(null); // Lights off
         LinearLayout row = null;
-        int n = 0;
-        for (String[] m : RoomLights.MOODS) {
-            if (n++ % 4 == 0) { row = new LinearLayout(this); box.addView(row, llp(-2, -2, 0, n == 1 ? 0 : dp(8), 0, 0)); }
-            tiles.add(moodTile(row, m[1], moodColour(m[9]), moodColour(m[10]), m[0].equals(OverlayService.currentMood), () -> {
-                pw.dismiss();
-                OverlayService.mood(this, m[0]);
-                OverlayService.currentMood = m[0];
-                updateMoodPill();
-                moodGlow(moodColour(m[9]), moodColour(m[10]));
-            }));
+        for (int i = 0; i < ids.size(); i++) {
+            if (i % 4 == 0) {
+                row = new LinearLayout(this);
+                row.setClipChildren(false);
+                row.setClipToPadding(false);
+                box.addView(row, llp(-2, -2, 0, i == 0 ? 0 : dp(12), 0, 0));
+            }
+            String id = ids.get(i);
+            String[] m = id == null ? null : RoomLights.find(id);
+            moodCards.add(moodCard(row, id, m == null ? "Lights off" : m[1], i % 4 != 0));
         }
-        tiles.add(moodTile(row, "Lights off", 0xFF3A3D45, 0xFF15161A, false, () -> {
-            pw.dismiss();
-            OverlayService.mood(this, null);
-            OverlayService.currentMood = null;
-            updateMoodPill();
-            moodGlow(0x99FFFFFF, 0x55FFFFFF);
-        }));
+
+        box.addView(buildBrightnessRow(), llp(-1, -2, 0, dp(16), 0, 0));
+
+        // Remote navigation: a plain 4 × 2 grid, Down from the bottom row to brightness, never out of the panel.
+        for (int i = 0; i < moodCards.size(); i++) {
+            View c = moodCards.get(i).card;
+            int col = i % 4, r = i / 4;
+            c.setNextFocusLeftId(moodCards.get(col == 0 ? i : i - 1).card.getId());
+            c.setNextFocusRightId(moodCards.get(col == 3 ? i : i + 1).card.getId());
+            c.setNextFocusUpId(moodCards.get(r == 0 ? i : i - 4).card.getId());
+            c.setNextFocusDownId(r == 0 ? moodCards.get(i + 4).card.getId() : brightRow.getId());
+        }
+
+        PopupWindow pw = new PopupWindow(box, -2, -2, true);
         pw.setOutsideTouchable(true);
-        pw.setElevation(dp(16));
-        pw.setOnDismissListener(anchor::requestFocus);
-        pw.showAsDropDown(anchor, 0, dp(8), Gravity.START);
-        int at = 0;
-        for (int i = 0; i < RoomLights.MOODS.length; i++) if (RoomLights.MOODS[i][0].equals(OverlayService.currentMood)) at = i;
-        tiles.get(at).requestFocus();
+        pw.setElevation(dp(24));
+        pw.setOnDismissListener(() -> { moodPanel = null; anchor.requestFocus(); styleMoodPill(); });
+        moodPanel = pw;
+        refreshMoodPanel(false);
+        pw.showAsDropDown(anchor, 0, dp(10), Gravity.START);
+        MoodCard start = moodCards.get(moodCards.size() - 1);
+        for (MoodCard c : moodCards) if (c.id != null && c.id.equals(OverlayService.currentMood)) start = c;
+        start.card.requestFocus();
     }
 
-    /** A glass tile with the mood's two colours as a soft gradient swatch and its name under it. */
-    private View moodTile(LinearLayout row, String name, int a, int b, boolean on, Runnable pick) {
-        LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setPadding(dp(8), dp(8), dp(8), dp(8));
-        tile.setFocusable(true);
-        tile.setClickable(true);
-        tile.setId(View.generateViewId());
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14));
-        bg.setColor(0x1AFFFFFF);
-        if (on) bg.setStroke(dp(2), 0xE6FFFFFF);
-        tile.setBackground(bg);
-        View swatch = new View(this);
-        GradientDrawable sw = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{a, b});
-        sw.setCornerRadius(dp(9));
-        swatch.setBackground(sw);
-        tile.addView(swatch, new LinearLayout.LayoutParams(-1, dp(40)));
-        TextView t = text(11, "sans-serif-medium", Color.WHITE);
-        t.setText(name);
-        t.setGravity(Gravity.CENTER);
-        tile.addView(t, llp(-1, -2, 0, dp(6), 0, 0));
-        tile.setOnFocusChangeListener((v, has) -> {
-            bg.setColor(has ? 0xF2FFFFFF : 0x1AFFFFFF);
-            t.setTextColor(has ? 0xFF111111 : Color.WHITE);
-            focusPop(v, has, 1.06f);
+    private MoodCard moodCard(LinearLayout row, String id, String name, boolean gap) {
+        MoodLook l = look(id);
+        MoodCard mc = new MoodCard();
+        mc.id = id;
+        FrameLayout card = new FrameLayout(this);
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setId(View.generateViewId());
+        card.setClipChildren(false);
+        card.setPadding(dp(6), dp(6), dp(6), dp(6));
+        mc.bg = new GradientDrawable();
+        mc.bg.setCornerRadius(dp(18));
+        mc.bg.setColor(0xFF1E2028);
+        mc.bg.setStroke(dp(1), 0x1FFFFFFF);
+        card.setBackground(mc.bg);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        MoodArt art = new MoodArt(this, l, dp(13));
+        col.addView(art, new LinearLayout.LayoutParams(-1, dp(70)));
+        mc.label = text(12, "sans-serif-medium", 0xEBFFFFFF);
+        mc.label.setText(name);
+        mc.label.setGravity(Gravity.CENTER);
+        mc.label.setSingleLine(true);
+        col.addView(mc.label, llp(-1, -2, 0, dp(7), 0, dp(3)));
+        card.addView(col, new FrameLayout.LayoutParams(-1, -2));
+
+        // Active: a small check in the corner of the artwork.
+        mc.badge = new CheckBadge(this, l.accent);
+        mc.badge.setAlpha(0f);
+        card.addView(mc.badge, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP | Gravity.END));
+        ((FrameLayout.LayoutParams) mc.badge.getLayoutParams()).setMargins(0, dp(4), dp(4), 0);
+
+        mc.halo = new Halo(this, l.accent);
+        mc.card = card;
+        // Focus (the remote): a white ring and a small lift. It never changes the lights; only OK does.
+        card.setOnFocusChangeListener((v, has) -> {
+            styleMoodCard(mc);
+            focusPop(v, has, 1.07f);
         });
-        tile.setOnClickListener(v -> pick.run());
-        row.addView(tile, llp(dp(104), -2, row.getChildCount() == 0 ? 0 : dp(8), 0, 0, 0));
-        return tile;
+        card.setOnClickListener(v -> pickMood(mc));
+        row.addView(withHalo(card, mc.halo), llp(dp(116), -2, gap ? dp(12) : 0, 0, 0, 0));
+        return mc;
+    }
+
+    private void styleMoodCard(MoodCard mc) {
+        boolean focused = mc.card.hasFocus();
+        boolean active = Objects.equals(mc.id, OverlayService.currentMood);
+        mc.bg.setStroke(focused ? dp(2.5f) : dp(1), focused ? 0xF2FFFFFF : active ? withAlpha(look(mc.id).accent, 0.6f) : 0x1FFFFFFF);
+        mc.bg.setColor(focused ? 0xFF2A2D36 : 0xFF1E2028);
+        mc.label.setTextColor(focused || active ? Color.WHITE : 0xB8FFFFFF);
+    }
+
+    private void pickMood(MoodCard mc) {
+        if (Objects.equals(mc.id, OverlayService.currentMood)) return; // already running
+        OverlayService.mood(this, mc.id);
+        OverlayService.currentMood = mc.id;
+        refreshMoodPanel(true);
+        styleMoodPill();
+        MoodLook l = look(mc.id);
+        moodGlow(l.stops[0], l.stops[l.stops.length - 1]);
+    }
+
+    /** Active glow and check on the running mood (pulsing in once when it changes), the status chip, brightness. */
+    private void refreshMoodPanel(boolean animate) {
+        if (moodPanel == null) return;
+        String now = OverlayService.currentMood;
+        for (MoodCard mc : moodCards) {
+            boolean active = Objects.equals(mc.id, now);
+            mc.halo.animate().cancel();
+            if (active && animate) {
+                mc.halo.setScaleX(0.7f);
+                mc.halo.setScaleY(0.7f);
+                mc.halo.animate().alpha(1f).scaleX(1.06f).scaleY(1.06f).setDuration(320).setInterpolator(SOFT)
+                        .withEndAction(() -> mc.halo.animate().scaleX(1f).scaleY(1f).setDuration(260).start()).start();
+            } else if (active) {
+                mc.halo.setAlpha(1f);
+                mc.halo.setScaleX(1f);
+                mc.halo.setScaleY(1f);
+            } else {
+                mc.halo.animate().alpha(0f).setDuration(animate ? 260 : 0).start();
+            }
+            mc.badge.animate().alpha(active ? 1f : 0f).scaleX(active ? 1f : 0.6f).scaleY(active ? 1f : 0.6f)
+                    .setDuration(animate ? 280 : 0).start();
+            styleMoodCard(mc);
+        }
+        String[] m = now == null ? null : RoomLights.find(now);
+        GradientDrawable chip = new GradientDrawable();
+        chip.setCornerRadius(dp(14));
+        chip.setColor(m == null ? 0x1AFFFFFF : 0x2E2BD982);
+        moodStatus.setBackground(chip);
+        moodStatus.setTextColor(m == null ? 0xB3FFFFFF : 0xFF6BEBA6);
+        moodStatus.setText(m == null ? "●  Lights normal" : "●  " + m[1] + " on");
+        updateBrightness();
+    }
+
+    // Brightness for the running mood, 10–100%, in steps of 10 with Left / Right. Each light keeps its own
+    // proportion; the change is sent once you stop pressing (Govee's cloud allows ~10 commands a minute).
+    private int moodBright = 100;
+    private final Runnable sendBright = () -> OverlayService.moodBrightness(this, moodBright);
+
+    private View buildBrightnessRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(16), dp(11), dp(16), dp(13));
+        row.setId(View.generateViewId());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(16));
+        bg.setColor(0x14FFFFFF);
+        bg.setStroke(dp(1), 0x14FFFFFF);
+        row.setBackground(bg);
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        MoodIcon sun = new MoodIcon(this, "sun", 0xD9FFFFFF);
+        top.addView(sun, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        TextView name = text(12, "sans-serif-medium", 0xE6FFFFFF);
+        name.setText("Brightness");
+        top.addView(name, llp(-2, -2, dp(9), 0, 0, 0));
+        brightHint = text(9, "sans-serif-medium", 0x80FFFFFF);
+        brightHint.setLetterSpacing(0.1f);
+        top.addView(brightHint, llp(0, -2, dp(10), 0, 0, 0));
+        ((LinearLayout.LayoutParams) brightHint.getLayoutParams()).weight = 1f;
+        brightValue = text(12, "sans-serif-medium", 0xE6FFFFFF);
+        top.addView(brightValue);
+        row.addView(top);
+        FrameLayout track = new FrameLayout(this);
+        GradientDrawable tg = new GradientDrawable();
+        tg.setCornerRadius(dp(3));
+        tg.setColor(0x26FFFFFF);
+        track.setBackground(tg);
+        brightFill = new View(this);
+        track.addView(brightFill, new FrameLayout.LayoutParams(0, -1));
+        row.addView(track, llp(-1, dp(6), 0, dp(10), 0, 0));
+        track.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> { if (r - l != or - ol) updateBrightness(); });
+        row.setOnFocusChangeListener((v, has) -> {
+            bg.setStroke(has ? dp(2.5f) : dp(1), has ? 0xF2FFFFFF : 0x14FFFFFF);
+            bg.setColor(has ? 0x24FFFFFF : 0x14FFFFFF);
+            updateBrightness();
+        });
+        row.setOnKeyListener((v, code, e) -> {
+            if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+            if (e.getAction() == KeyEvent.ACTION_DOWN && OverlayService.currentMood != null) {
+                moodBright = Math.max(10, Math.min(100, moodBright + (code == KeyEvent.KEYCODE_DPAD_RIGHT ? 10 : -10)));
+                updateBrightness();
+                handler.removeCallbacks(sendBright);
+                handler.postDelayed(sendBright, 700);
+            }
+            return true; // Left / Right only adjust; they never leave the row
+        });
+        brightRow = row;
+        return row;
+    }
+
+    private void updateBrightness() {
+        if (brightRow == null) return;
+        boolean on = OverlayService.currentMood != null;
+        brightRow.setFocusable(on);
+        brightRow.setAlpha(on ? 1f : 0.45f);
+        brightValue.setText(on ? moodBright + "%" : "—");
+        brightHint.setText(!on ? "PICK A MOOD FIRST" : brightRow.hasFocus() ? "◀  ▶" : "");
+        View track = (View) brightFill.getParent();
+        int w = track.getWidth();
+        if (w == 0) return;
+        MoodLook l = look(OverlayService.currentMood);
+        GradientDrawable fill = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                on ? new int[]{l.stops[0], l.stops[l.stops.length - 1]} : new int[]{0x66FFFFFF, 0x66FFFFFF});
+        fill.setCornerRadius(dp(3));
+        brightFill.setBackground(fill);
+        brightFill.getLayoutParams().width = on ? w * moodBright / 100 : 0;
+        brightFill.requestLayout();
     }
 
     /** A frosty wash of the mood's colours across the whole screen, with a pale sheen sweeping through it. */
     private void moodGlow(int a, int b) {
         View wash = new View(this);
         wash.setBackground(new GradientDrawable(GradientDrawable.Orientation.BL_TR,
-                new int[]{withAlpha(a, 0.55f), withAlpha(0xFFFFFFFF, 0.16f), withAlpha(b, 0.55f)}));
+                new int[]{withAlpha(a, 0.5f), withAlpha(0xFFFFFFFF, 0.14f), withAlpha(b, 0.5f)}));
         View sheen = new View(this);
         sheen.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{0x00FFFFFF, 0x40FFFFFF, 0x00FFFFFF}));
@@ -1286,11 +1527,192 @@ public class MainActivity extends Activity {
         wash.setScaleY(1.06f);
         sheen.setRotation(12f);
         sheen.setTranslationX(-w / 2f);
-        wash.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(SOFT).withLayer()
-                .withEndAction(() -> wash.animate().alpha(0f).setStartDelay(500).setDuration(1100).withLayer()
+        wash.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(350).setInterpolator(SOFT).withLayer()
+                .withEndAction(() -> wash.animate().alpha(0f).setStartDelay(400).setDuration(900).withLayer()
                         .withEndAction(() -> rootView.removeView(wash)).start()).start();
-        sheen.animate().translationX(w * 1.2f).setDuration(1400).setInterpolator(SOFT).withLayer()
+        sheen.animate().translationX(w * 1.2f).setDuration(1200).setInterpolator(SOFT).withLayer()
                 .withEndAction(() -> rootView.removeView(sheen)).start();
+    }
+
+    /**
+     * A scene card's artwork, drawn once: the mood's gradient, two soft blooms of light like a lamp lighting a
+     * wall, a glass sheen across the top, a hairline edge and a line icon.
+     */
+    private static final class MoodArt extends View {
+        private final MoodLook look;
+        private final float radius;
+        private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG), bloomA = new Paint(Paint.ANTI_ALIAS_FLAG),
+                bloomB = new Paint(Paint.ANTI_ALIAS_FLAG), sheen = new Paint(Paint.ANTI_ALIAS_FLAG),
+                edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final MoodIcon icon;
+        private final android.graphics.Path clip = new android.graphics.Path();
+
+        MoodArt(Context c, MoodLook look, float radius) {
+            super(c);
+            this.look = look;
+            this.radius = radius;
+            boolean light = look.icon.equals("book");
+            icon = new MoodIcon(c, look.icon, light ? 0xFF3A3F4B : Color.WHITE);
+            edge.setStyle(Paint.Style.STROKE);
+            edge.setStrokeWidth(c.getResources().getDisplayMetrics().density);
+            edge.setColor(0x2EFFFFFF);
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+            int[] st = look.stops.length > 1 ? look.stops : new int[]{look.stops[0], look.stops[0]};
+            base.setShader(new android.graphics.LinearGradient(0, 0, w, h, st, null, android.graphics.Shader.TileMode.CLAMP));
+            bloomA.setShader(new android.graphics.RadialGradient(w * 0.22f, h * 0.15f, w * 0.75f,
+                    new int[]{0x47FFFFFF, 0x00FFFFFF}, null, android.graphics.Shader.TileMode.CLAMP));
+            int deep = st[st.length - 1];
+            bloomB.setShader(new android.graphics.RadialGradient(w * 0.88f, h * 1.05f, w * 0.7f,
+                    new int[]{withAlpha(brighten(deep), 0.85f), withAlpha(deep, 0f)}, null, android.graphics.Shader.TileMode.CLAMP));
+            sheen.setShader(new android.graphics.LinearGradient(0, 0, 0, h * 0.5f, new int[]{0x2EFFFFFF, 0x00FFFFFF},
+                    null, android.graphics.Shader.TileMode.CLAMP));
+            clip.reset();
+            clip.addRoundRect(0, 0, w, h, radius, radius, android.graphics.Path.Direction.CW);
+            int s = Math.round(h * 0.38f);
+            icon.layout(0, 0, s, s);
+        }
+
+        private static int brighten(int c) {
+            float[] hsv = new float[3];
+            Color.colorToHSV(c, hsv);
+            hsv[2] = Math.min(1f, hsv[2] * 1.5f + 0.1f);
+            return Color.HSVToColor(hsv);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            int w = getWidth(), h = getHeight();
+            c.save();
+            c.clipPath(clip);
+            c.drawRect(0, 0, w, h, base);
+            c.drawRect(0, 0, w, h, bloomB);
+            c.drawRect(0, 0, w, h, bloomA);
+            c.drawRect(0, 0, w, h * 0.5f, sheen);
+            c.restore();
+            float half = edge.getStrokeWidth() / 2;
+            c.drawRoundRect(half, half, w - half, h - half, radius, radius, edge);
+            c.save();
+            c.translate((w - icon.getWidth()) / 2f, (h - icon.getHeight()) / 2f);
+            icon.draw(c);
+            c.restore();
+        }
+    }
+
+    /** Line icons for the scenes, drawn on a 24 × 24 grid so they stay crisp at any size. */
+    private static final class MoodIcon extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path path = new android.graphics.Path();
+        private final String kind;
+
+        MoodIcon(Context c, String kind, int color) {
+            super(c);
+            this.kind = kind;
+            p.setColor(color);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeJoin(Paint.Join.ROUND);
+            if (color == Color.WHITE) p.setShadowLayer(3f, 0, 1f, 0x55000000);
+            build();
+        }
+
+        private void build() {
+            android.graphics.Path q = path;
+            switch (kind) {
+                case "bolt":
+                    q.moveTo(13, 2); q.lineTo(4.5f, 13.5f); q.lineTo(11, 13.5f); q.lineTo(10, 22); q.lineTo(19.5f, 9.5f);
+                    q.lineTo(13, 9.5f); q.close(); break;
+                case "heart":
+                    q.moveTo(12, 20.5f); q.cubicTo(5, 15.5f, 2.5f, 12.2f, 2.5f, 8.6f); q.cubicTo(2.5f, 5.7f, 4.7f, 3.5f, 7.5f, 3.5f);
+                    q.cubicTo(9.3f, 3.5f, 11, 4.5f, 12, 6); q.cubicTo(13, 4.5f, 14.7f, 3.5f, 16.5f, 3.5f);
+                    q.cubicTo(19.3f, 3.5f, 21.5f, 5.7f, 21.5f, 8.6f); q.cubicTo(21.5f, 12.2f, 19, 15.5f, 12, 20.5f); q.close(); break;
+                case "waves":
+                    for (float y : new float[]{7.5f, 12, 16.5f}) {
+                        q.moveTo(3, y);
+                        for (float x = 3; x < 21; x += 6) { q.quadTo(x + 1.5f, y - 2, x + 3, y); q.quadTo(x + 4.5f, y + 2, x + 6, y); }
+                    }
+                    break;
+                case "sunset":
+                    q.moveTo(3, 17); q.lineTo(21, 17);
+                    q.moveTo(7, 20.5f); q.lineTo(17, 20.5f);
+                    q.addArc(7, 12, 17, 22, 180, 180);
+                    q.moveTo(12, 6); q.lineTo(12, 9);
+                    q.moveTo(5.6f, 9.6f); q.lineTo(7.4f, 11.4f);
+                    q.moveTo(18.4f, 9.6f); q.lineTo(16.6f, 11.4f);
+                    q.moveTo(2.5f, 14); q.lineTo(4.5f, 14); q.moveTo(19.5f, 14); q.lineTo(21.5f, 14); break;
+                case "sparkle":
+                    q.moveTo(10, 4); q.quadTo(11, 11, 17, 12.5f); q.quadTo(11, 14, 10, 21); q.quadTo(9, 14, 3, 12.5f);
+                    q.quadTo(9, 11, 10, 4); q.close();
+                    q.moveTo(18.5f, 3); q.quadTo(19, 5.5f, 21, 6); q.quadTo(19, 6.5f, 18.5f, 9); q.quadTo(18, 6.5f, 16, 6);
+                    q.quadTo(18, 5.5f, 18.5f, 3); q.close(); break;
+                case "ghost":
+                    q.moveTo(5.5f, 21); q.lineTo(5.5f, 10.5f); q.cubicTo(5.5f, 6.5f, 8.4f, 3.5f, 12, 3.5f);
+                    q.cubicTo(15.6f, 3.5f, 18.5f, 6.5f, 18.5f, 10.5f); q.lineTo(18.5f, 21);
+                    q.lineTo(16.3f, 19); q.lineTo(14.2f, 21); q.lineTo(12, 19); q.lineTo(9.8f, 21); q.lineTo(7.7f, 19); q.close();
+                    q.addCircle(9.6f, 10.5f, 0.6f, android.graphics.Path.Direction.CW);
+                    q.addCircle(14.4f, 10.5f, 0.6f, android.graphics.Path.Direction.CW); break;
+                case "book":
+                    q.moveTo(12, 6.5f); q.cubicTo(10, 5, 6.5f, 4.6f, 3, 5.2f); q.lineTo(3, 18.5f); q.cubicTo(6.5f, 17.9f, 10, 18.3f, 12, 19.8f);
+                    q.cubicTo(14, 18.3f, 17.5f, 17.9f, 21, 18.5f); q.lineTo(21, 5.2f); q.cubicTo(17.5f, 4.6f, 14, 5, 12, 6.5f); q.close();
+                    q.moveTo(12, 6.5f); q.lineTo(12, 19.8f); break;
+                case "power":
+                    q.addArc(4.5f, 5, 19.5f, 20, -60, 300);
+                    q.moveTo(12, 3); q.lineTo(12, 11.5f); break;
+                case "check":
+                    q.moveTo(5.5f, 12.5f); q.lineTo(10, 17); q.lineTo(18.5f, 7.5f); break;
+                case "sun":
+                    q.addCircle(12, 12, 4, android.graphics.Path.Direction.CW);
+                    for (int i = 0; i < 8; i++) {
+                        double a = Math.PI / 4 * i;
+                        q.moveTo(12 + (float) Math.cos(a) * 7, 12 + (float) Math.sin(a) * 7);
+                        q.lineTo(12 + (float) Math.cos(a) * 9.5f, 12 + (float) Math.sin(a) * 9.5f);
+                    }
+                    break;
+                default: break;
+            }
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float s = Math.min(getWidth(), getHeight()) / 24f;
+            p.setStrokeWidth(kind.equals("check") ? 3f : 1.9f);
+            c.save();
+            c.scale(s, s);
+            c.drawPath(path, p);
+            c.restore();
+        }
+
+        @Override public void draw(Canvas c) { onDraw(c); }
+    }
+
+    /** The running scene's check: a white disc with a check in the mood's colour. */
+    private static final class CheckBadge extends View {
+        private final Paint disc = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final MoodIcon check;
+
+        CheckBadge(Context c, int accent) {
+            super(c);
+            disc.setColor(0xF5FFFFFF);
+            disc.setShadowLayer(4f, 0, 1.5f, 0x66000000);
+            float[] hsv = new float[3];
+            Color.colorToHSV(accent, hsv);
+            hsv[2] = Math.min(hsv[2], 0.75f); // dark enough to read on white
+            if (hsv[1] < 0.2f) hsv[2] = 0.3f;
+            check = new MoodIcon(c, "check", Color.HSVToColor(hsv));
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+            int s = Math.round(w * 0.72f);
+            check.layout(0, 0, s, s);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float r = getWidth() / 2f;
+            c.drawCircle(r, r, r - 2, disc);
+            c.save();
+            c.translate((getWidth() - check.getWidth()) / 2f, (getHeight() - check.getHeight()) / 2f);
+            check.draw(c);
+            c.restore();
+        }
     }
 
     // ---------------------------------------------------------------- screensaver on demand

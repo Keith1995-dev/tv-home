@@ -95,6 +95,7 @@ public class OverlayService extends Service {
 
     @Override
     public int onStartCommand(Intent i, int flags, int id) {
+        if (i != null && "moodBrightness".equals(i.getAction()) && lights != null) lights.brightness(i.getIntExtra("pct", 100));
         if (i != null && "mood".equals(i.getAction())) {
             if (lights == null) lights = new RoomLights(this);
             lights.set(i.getStringExtra("id"));
@@ -111,6 +112,15 @@ public class OverlayService extends Service {
 
     private RoomLights lights;
     static volatile String currentMood; // the mood that's on, for the home screen; null = lights as you left them
+
+    /** The running mood's brightness, 10–100% of its own level for each light. */
+    static void moodBrightness(Context c, int pct) {
+        try {
+            c.startForegroundService(new Intent(c, OverlayService.class).setAction("moodBrightness").putExtra("pct", pct));
+        } catch (RuntimeException e) {
+            android.util.Log.e(TAG, "mood brightness: " + e.getMessage());
+        }
+    }
 
     /** Set a mood (RoomLights.MOODS id) on every light, or null to put them all back. Lasts until the TV goes off. */
     static void mood(Context c, String id) {

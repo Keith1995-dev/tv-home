@@ -54,6 +54,7 @@ final class RoomLights {
     private Map<String, JSONObject> before;
     private final Map<String, String> skuOf = new LinkedHashMap<>();
     private volatile String mood;
+    private volatile int scale = 100; // the panel's Brightness: % of each mood's own brightness
 
     RoomLights(Context ctx) {
         this.ctx = ctx;
@@ -82,7 +83,7 @@ final class RoomLights {
                 boolean isUp = UPLIGHTER.equals(skuOf.get(ip));
                 if (isUp && cloudDone) continue;
                 String colour = isUp ? m[9] : m[5];
-                int pct = Integer.parseInt(isUp ? m[3] : m[6]);
+                int pct = scaled(isUp ? m[3] : m[6]);
                 for (int round = 0; round < 2; round++) { // UDP can drop a message: say it twice
                     goveeSend(ip, "turn", json("value", 1));
                     goveeColour(ip, colour);
@@ -96,10 +97,32 @@ final class RoomLights {
                     sleep(1700);
                     bridge("/set?on=0");
                 } else {
-                    bridge("/set?on=1&level=" + Math.round(Integer.parseInt(m[8]) * 2.54f) + bulbColour(m[7]) + "&t=15");
+                    bridge("/set?on=1&level=" + Math.round(scaled(m[8]) * 2.54f) + bulbColour(m[7]) + "&t=15");
                 }
             }
             android.util.Log.e(TAG, "mood " + id + " on " + before.size() + " light(s), uplighter " + (cloudDone ? "via cloud" : "via LAN"));
+        });
+    }
+
+    private int scaled(String pct) { return Math.max(1, Integer.parseInt(pct) * scale / 100); }
+
+    /** Brightness for the running mood, 10–100% of each light's own level for it; kept for later moods too. */
+    void brightness(int pct) {
+        scale = Math.max(10, Math.min(100, pct));
+        String[] m = mood == null ? null : find(mood);
+        if (m == null) return;
+        net.execute(() -> {
+            if (before == null) return;
+            JSONObject up = cloudDevice(UPLIGHTER);
+            boolean cloudUp = up != null && upSet(up, "devices.capabilities.range", "brightness", scaled(m[3]));
+            for (String ip : before.keySet()) {
+                if (ip.equals("bulb") || ip.equals("cloud")) continue;
+                boolean isUp = UPLIGHTER.equals(skuOf.get(ip));
+                if (isUp && cloudUp) continue;
+                for (int round = 0; round < 2; round++) { goveeBrightness(ip, scaled(isUp ? m[3] : m[6])); sleep(200); }
+            }
+            if (before.containsKey("bulb") && !m[7].equals("off")) bridge("/set?level=" + Math.round(scaled(m[8]) * 2.54f) + "&t=8");
+            android.util.Log.e(TAG, "mood " + mood + " brightness " + scale + "%");
         });
     }
 
@@ -107,11 +130,12 @@ final class RoomLights {
     private boolean uplighterMood(JSONObject dev, String[] m) {
         String up = m[2];
         boolean upOn = !up.equals("off"), downOn = !m[4].equals("off");
-        boolean ok = cloud(dev, "devices.capabilities.on_off", "powerSwitch", 1)
-                && cloud(dev, "devices.capabilities.toggle", "sideLightToggle", upOn ? 1 : 0)
-                && cloud(dev, "devices.capabilities.toggle", "rippleLightToggle", upOn ? 1 : 0)
-                && cloud(dev, "devices.capabilities.toggle", "bottomLightToggle", downOn ? 1 : 0)
-                && cloud(dev, "devices.capabilities.range", "brightness", Integer.parseInt(m[3]));
+        // Only what changes: Govee allows about 10 commands a minute per lamp.
+        boolean ok = upSet(dev, "devices.capabilities.on_off", "powerSwitch", 1)
+                && upSet(dev, "devices.capabilities.toggle", "sideLightToggle", upOn ? 1 : 0)
+                && upSet(dev, "devices.capabilities.toggle", "rippleLightToggle", upOn ? 1 : 0)
+                && upSet(dev, "devices.capabilities.toggle", "bottomLightToggle", downOn ? 1 : 0)
+                && upSet(dev, "devices.capabilities.range", "brightness", scaled(m[3]));
         if (!ok) return false;
         if (downOn) cloud(dev, "devices.capabilities.color_setting", "colorTemperatureK", Integer.parseInt(m[4].substring(1)));
         if (up.startsWith("scene:")) {
@@ -125,6 +149,18 @@ final class RoomLights {
             for (int i = 0; i < 8; i++) ((alt ? i % 2 == 0 : i < 4) ? first : second).put(i);
             return segments(dev, first, c[0]) && segments(dev, second, c[1]);
         }
+        return true;
+    }
+
+    // What the uplighter's switches and brightness are now, as far as we know (from the snapshot, then our own
+    // commands), so unchanged ones aren't sent again.
+    private final Map<String, Integer> upKnown = new LinkedHashMap<>();
+
+    private boolean upSet(JSONObject dev, String type, String instance, int value) {
+        Integer known = upKnown.get(instance);
+        if (known != null && known == value) return true;
+        if (!cloud(dev, type, instance, value)) return false;
+        upKnown.put(instance, value);
         return true;
     }
 
@@ -146,21 +182,25 @@ final class RoomLights {
         }
         JSONObject up = cloudDevice(UPLIGHTER);
         JSONObject state = up == null ? null : cloudState(up);
-        if (state != null) before.put("cloud", state);
+        if (state != null) {
+            before.put("cloud", state);
+            upKnown.clear();
+            for (String k : new String[]{"powerSwitch", "sideLightToggle", "rippleLightToggle", "bottomLightToggle", "brightness"})
+                if (state.has(k)) upKnown.put(k, state.optInt(k));
+        }
         JSONObject b = bridgeJson("/snapshot");
         if (b != null) before.put("bulb", b);
     }
 
     private void restore() {
         if (before == null) return;
-        // The uplighter's sections back on or off as they were, then every lamp's own colour and brightness.
-        JSONObject state = before.get("cloud"), up = cloudDevice(UPLIGHTER);
-        if (state != null && up != null) {
-            for (String t : new String[]{"sideLightToggle", "rippleLightToggle", "bottomLightToggle"})
-                if (state.has(t)) cloud(up, "devices.capabilities.toggle", t, state.optInt(t));
-        }
+        JSONObject state = before.get("cloud"), up = state == null ? null : cloudDevice(UPLIGHTER);
+        boolean cloudUp = state != null && up != null;
         for (Map.Entry<String, JSONObject> e : before.entrySet()) {
             if (e.getKey().equals("bulb") || e.getKey().equals("cloud")) continue;
+            // The uplighter goes back through the cloud below: its LAN colour command drives the colour sections,
+            // so "white" would switch the upward light on and the white-only downward lamp off.
+            if (cloudUp && UPLIGHTER.equals(skuOf.get(e.getKey()))) continue;
             String ip = e.getKey();
             JSONObject s = e.getValue();
             JSONObject col = s.optJSONObject("color");
@@ -172,6 +212,15 @@ final class RoomLights {
                 if (s.optInt("onOff") == 0) goveeSend(ip, "turn", json("value", 0));
                 sleep(300);
             }
+        }
+        if (cloudUp) {
+            // Its three sections on or off as they were, then its brightness (and its white, if it had one).
+            for (String t : new String[]{"sideLightToggle", "rippleLightToggle", "bottomLightToggle"})
+                if (state.has(t)) upSet(up, "devices.capabilities.toggle", t, state.optInt(t));
+            if (state.optInt("brightness") > 0) upSet(up, "devices.capabilities.range", "brightness", state.optInt("brightness"));
+            if (state.optInt("colorTemperatureK") > 0)
+                cloud(up, "devices.capabilities.color_setting", "colorTemperatureK", state.optInt("colorTemperatureK"));
+            if (state.optInt("powerSwitch", 1) == 0) upSet(up, "devices.capabilities.on_off", "powerSwitch", 0);
         }
         if (before.containsKey("bulb")) bridgeJson("/restore");
         before = null;
