@@ -10,6 +10,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -19,8 +20,9 @@ import java.util.concurrent.Executors;
  * Room moods: pick one on the home screen and every light in the room takes its colours until you pick another,
  * press Lights off, or turn the TV off. Then each light goes back exactly as it was before the first mood.
  *
- * Govee lamps are driven directly over the Wi-Fi with their "LAN Control" protocol (UDP JSON). A Matter bulb goes
- * through tools/lights/orion-bridge.mjs on a computer (lights_bridge_url), since Matter needs a controller.
+ * Govee lamps are driven directly over the Wi-Fi with their "LAN Control" protocol (UDP JSON). A Matter bulb is
+ * driven by the TV itself (MatterBulb, with matter_bulb in secrets.xml), or else through
+ * tools/lights/orion-bridge.mjs on a computer (lights_bridge_url).
  */
 final class RoomLights {
     private static final String TAG = "tvhome";
@@ -490,6 +492,8 @@ final class RoomLights {
     }
 
     private JSONObject bridgeJson(String path) {
+        MatterBulb m = matterBulb();
+        if (m != null) return localBulb(m, path);
         String base = ctx.getString(R.string.lights_bridge_url).trim();
         if (base.isEmpty()) return null;
         try {
@@ -508,6 +512,76 @@ final class RoomLights {
     }
 
     private void bridge(String path) { bridgeJson(path); }
+
+    // With matter_bulb in secrets.xml the TV is a Matter controller itself (MatterBulb) and answers the bridge's
+    // calls here, so the bulb needs no computer.
+
+    private MatterBulb matter;
+    private boolean matterTried;
+    private long[] bulbSaved;
+
+    private MatterBulb matterBulb() {
+        if (matterTried) return matter;
+        matterTried = true;
+        int id = ctx.getResources().getIdentifier("matter_bulb", "string", ctx.getPackageName());
+        String creds = id == 0 ? "" : ctx.getString(id).trim();
+        if (creds.isEmpty()) return null;
+        try {
+            matter = new MatterBulb(creds);
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "matter_bulb: " + e);
+        }
+        return matter;
+    }
+
+    /** The bridge's /snapshot, /set, /restore and /state, done by the TV (see tools/lights/orion-bridge.mjs). */
+    private JSONObject localBulb(MatterBulb m, String path) {
+        Map<String, String> q = new HashMap<>();
+        int qi = path.indexOf('?');
+        if (qi >= 0) for (String kv : path.substring(qi + 1).split("&")) {
+            int e = kv.indexOf('=');
+            if (e > 0) q.put(kv.substring(0, e), kv.substring(e + 1));
+        }
+        String op = qi < 0 ? path : path.substring(0, qi);
+        int t = q.containsKey("t") ? Integer.parseInt(q.get("t")) : 10;
+        try {
+            switch (op) {
+                case "/snapshot":
+                case "/state": {
+                    long[] s = m.state();
+                    if (s == null) return null;
+                    if (op.equals("/snapshot")) bulbSaved = s;
+                    return new JSONObject().put("on", s[0] == 1).put("level", s[1]).put("mode", s[2])
+                            .put("hue", s[3]).put("sat", s[4]).put("mireds", s[5]);
+                }
+                case "/set":
+                    if ("0".equals(q.get("on"))) { m.off(); break; }
+                    if ("1".equals(q.get("on"))) m.on();
+                    if (q.containsKey("level")) m.level(Integer.parseInt(q.get("level")), t);
+                    if (q.containsKey("mireds")) m.mireds(Integer.parseInt(q.get("mireds")), t);
+                    else if (q.containsKey("hue"))
+                        m.hueSat(Integer.parseInt(q.get("hue")), q.containsKey("sat") ? Integer.parseInt(q.get("sat")) : 254, t);
+                    break;
+                case "/restore": {
+                    long[] s = bulbSaved;
+                    bulbSaved = null;
+                    if (s == null) break;
+                    if (s[0] != 1) { m.off(); break; }
+                    m.on();
+                    if (s[2] == 2 && s[5] > 0) m.mireds((int) s[5], 15);
+                    else if (s[3] >= 0) m.hueSat((int) s[3], s[4] >= 0 ? (int) s[4] : 254, 15);
+                    if (s[1] >= 0) m.level((int) s[1], 15);
+                    break;
+                }
+                default:
+                    return null;
+            }
+            return new JSONObject().put("ok", true);
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "matter bulb " + path + ": " + e);
+            return null;
+        }
+    }
 
     private static JSONObject json(String k, Object v) {
         try { return new JSONObject().put(k, v); } catch (org.json.JSONException e) { return new JSONObject(); }

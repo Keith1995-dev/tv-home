@@ -33,11 +33,11 @@ Apple Home / Google Home / Alexa keep working as before.
   only what changes, and the uplighter retries every 20 seconds if Govee turns it away. A lamp that drops off the
   Wi-Fi while off is woken through the cloud when the lights come back on.
 
-## Matter bulbs (through a computer)
+## Matter bulbs
 
-Matter bulbs only take commands from a Matter controller, so a computer on the same Wi-Fi runs one
-(matter.js) as an extra controller next to Apple Home or Google Home. The bulb only follows along while that
-computer is awake.
+Matter bulbs only take commands from a Matter controller. A computer pairs the bulb once with matter.js (an extra
+controller next to Apple Home or Google Home); then the TV takes over that pairing and drives the bulb itself
+(`MatterBulb.java`), so nothing else needs to stay on. Steps 1–2 pair it, step 3 hands it to the TV.
 
 1. Install the controller (needs Node.js):
 
@@ -53,12 +53,24 @@ computer is awake.
 
    and at the `matter>` prompt: `commission pair --pairing-code <the code> 5000`, then `exit`.
 
-3. Make a key and start the bridge (keep it running):
+3. Copy the pairing into the launcher's secrets.xml (`matter_bulb`) and rebuild. Give the bulb's addresses: its
+   IPv6 link-local address (stable; the matter.js shell logs it as `udp://[fe80::…%en0]:5540` when it connects)
+   and its IPv4 address as a fallback:
+
+   ```bash
+   python3 tools/lights/matter-creds.py 5000 fe80::xxxx:xxxx:xxxx:xxxx 192.168.1.50
+   ```
+
+   That's it: the TV opens its own encrypted session with the bulb when a mood starts. The matter.js storage in
+   `~/.matter/shell-0` holds the pairing's keys; keep it (or secrets.xml) to rebuild later.
+
+**Or keep a computer in between** (the older way, instead of step 3): make a key and start the bridge, and keep it
+running:
 
    ```bash
    openssl rand -hex 12 > ~/tv-home-tools/lights-bridge.key
    BRIDGE_KEY=$(cat ~/tv-home-tools/lights-bridge.key) node tools/lights/orion-bridge.mjs
    ```
 
-4. Put `http://<computer's IP>:8766?key=<the key>` in `launcher/res/values/secrets.xml` as `lights_bridge_url` and
-   rebuild.
+   Then put `http://<computer's IP>:8766?key=<the key>` in `launcher/res/values/secrets.xml` as `lights_bridge_url`,
+   leave `matter_bulb` empty, and rebuild.
