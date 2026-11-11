@@ -357,7 +357,11 @@ public class OverlayService extends Service {
         @Override public void onReceive(Context c, Intent i) {
             if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) { // TV off: radio off, lights back to normal
                 stopMusic();
-                if (lights != null && lights.mood() != null) { lights.set(null); currentMood = null; }
+                // A mood ends with the TV; Lights off stays off.
+                if (lights != null && lights.mood() != null && !RoomLights.OFF.equals(lights.mood())) {
+                    lights.set(null);
+                    currentMood = null;
+                }
                 return;
             }
             handler.removeCallbacks(wakeBriefing);

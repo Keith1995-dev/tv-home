@@ -38,13 +38,16 @@ final class RoomLights {
      */
     static final String[][] MOODS = {
             {"action", "Action", "alt:#FF1A1A,#1F4DFF", "90", "off", "#1F4DFF", "55", "#1F4DFF", "35", "#FF1A1A", "#1F4DFF"},
-            {"romance", "Romance", "split:#FF3D9A,#A447FF", "60", "off", "#A447FF", "35", "#FF5FA8", "20", "#FF3D9A", "#A447FF"},
-            {"chill", "Chill", "scene:Aurora", "70", "off", "#2B4BFF", "30", "#12D6C2", "20", "#19E68C", "#2B4BFF"},
-            {"cozy", "Cozy", "scene:Candlelight", "60", "k2700", "#FF7A1F", "35", "k2200", "30", "#FFB46B", "#FF7A1F"},
+            {"romance", "Romance", "split:#FF2D6F,#C2187A", "45", "off", "#FF4F7B", "30", "k2200", "15", "#FF4FA3", "#C2187A"},
+            {"chill", "Chill", "scene:Aurora", "70", "off", "#1E5BFF", "30", "#2EC4D6", "20", "#19E68C", "#2B4BFF"},
+            {"cozy", "Cozy", "scene:Candlelight", "60", "k2700", "#FF8C2A", "35", "k2200", "30", "#FFB46B", "#FF7A1F"},
             {"party", "Party", "scene:Dance Party", "100", "off", "#20E5FF", "85", "#8A2BFF", "60", "#FF20D0", "#20E5FF"},
-            {"horror", "Horror", "scene:Ghost", "40", "off", "#3A0060", "12", "off", "0", "#B0000A", "#3A0060"},
-            {"focus", "Focus", "off", "80", "k5000", "k4000", "60", "k5000", "80", "#EEF2FF", "#FFE9D2"},
+            {"horror", "Horror", "alt:#C0000F,#2A0006", "25", "off", "#5A0010", "8", "#B00010", "4", "#B0000A", "#3A0060"},
+            {"focus", "Focus", "split:#9BE8A6,#FFD27A", "55", "k5000", "#FFD27A", "40", "#D2FFD6", "85", "#9BE8A6", "#FFD27A"},
     };
+
+    /** Not a mood: every light off. Picking it again (or a mood) brings them back. */
+    static final String OFF = "off";
 
     private final Context ctx;
     private final SharedPreferences prefs;
@@ -68,12 +71,14 @@ final class RoomLights {
         return null;
     }
 
-    /** null or an unknown id = lights off: everything back as it was. */
+    /** A mood id; OFF for every light off; null to put every light back as it was before the first mood. */
     void set(String id) {
-        String[] m = id == null ? null : find(id);
-        mood = m == null ? null : id;
+        if (id == null) { mood = null; net.execute(this::restore); return; }
+        if (OFF.equals(id)) { mood = OFF; net.execute(this::allOff); return; }
+        String[] m = find(id);
+        if (m == null) return;
+        mood = id;
         net.execute(() -> {
-            if (m == null) { restore(); return; }
             if (before == null) snapshot();
             // The uplighter first: through Govee's cloud its upward light can take segment colours and scenes.
             JSONObject up = cloudDevice(UPLIGHTER);
@@ -81,12 +86,17 @@ final class RoomLights {
             for (String ip : before.keySet()) {
                 if (ip.equals("bulb") || ip.equals("cloud")) continue;
                 boolean isUp = UPLIGHTER.equals(skuOf.get(ip));
-                if (isUp && cloudDone) continue;
+                // With a key the uplighter only goes through the cloud: its LAN colour command switches the upward
+                // light on and the downward lamp off, so it can't follow the mood's sections.
+                if (isUp && up != null) continue;
                 String colour = isUp ? m[9] : m[5];
                 int pct = scaled(isUp ? m[3] : m[6]);
-                for (int round = 0; round < 2; round++) { // UDP can drop a message: say it twice
+                // Say it twice (UDP can drop a message), with a pause after the colour: some lamps (the H6076)
+                // ignore a brightness that arrives while they're still changing colour.
+                for (int round = 0; round < 2; round++) {
                     goveeSend(ip, "turn", json("value", 1));
                     goveeColour(ip, colour);
+                    sleep(400);
                     goveeBrightness(ip, pct);
                     sleep(250);
                 }
@@ -100,8 +110,46 @@ final class RoomLights {
                     bridge("/set?on=1&level=" + Math.round(scaled(m[8]) * 2.54f) + bulbColour(m[7]) + "&t=15");
                 }
             }
-            android.util.Log.e(TAG, "mood " + id + " on " + before.size() + " light(s), uplighter " + (cloudDone ? "via cloud" : "via LAN"));
+            if (up != null && !cloudDone) retryUplighter(id, 1);
+            android.util.Log.e(TAG, "mood " + id + " on " + before.size() + " light(s), uplighter " + (up == null ? "via LAN" : cloudDone ? "via cloud" : "waiting for Govee"));
         });
+    }
+
+    /**
+     * Govee's cloud turns a lamp away for a while after about 10 commands in a minute (quick mood changes do
+     * that), so the uplighter tries again in 20 seconds, up to three times, unless another mood was picked.
+     */
+    private void retryUplighter(String id, int attempt) {
+        if (attempt > 3) { android.util.Log.e(TAG, "mood " + id + ": Govee kept refusing the uplighter"); return; }
+        new Thread(() -> {
+            sleep(20_000);
+            net.execute(() -> {
+                if (!id.equals(mood)) return;
+                String[] m = find(id);
+                JSONObject up = cloudDevice(UPLIGHTER);
+                if (m == null || up == null) return;
+                if (uplighterMood(up, m)) android.util.Log.e(TAG, "mood " + id + ": uplighter caught up (try " + attempt + ")");
+                else retryUplighter(id, attempt + 1);
+            });
+        }).start();
+    }
+
+    /** Every light off, remembering how they were first so picking Lights off again brings them back. */
+    private void allOff() {
+        if (before == null) snapshot();
+        JSONObject up = cloudDevice(UPLIGHTER);
+        for (String ip : before.keySet()) {
+            if (ip.equals("bulb") || ip.equals("cloud")) continue;
+            if (UPLIGHTER.equals(skuOf.get(ip)) && up != null) continue;
+            for (int round = 0; round < 2; round++) { goveeSend(ip, "turn", json("value", 0)); sleep(250); }
+        }
+        if (up != null && !upSet(up, "devices.capabilities.on_off", "powerSwitch", 0)) {
+            // Govee busy: the LAN can at least switch it off.
+            for (String ip : before.keySet()) if (UPLIGHTER.equals(skuOf.get(ip))) goveeSend(ip, "turn", json("value", 0));
+            upKnown.remove("powerSwitch");
+        }
+        if (before.containsKey("bulb")) bridge("/set?on=0");
+        android.util.Log.e(TAG, "lights off");
     }
 
     private int scaled(String pct) { return Math.max(1, Integer.parseInt(pct) * scale / 100); }
@@ -110,7 +158,7 @@ final class RoomLights {
     void brightness(int pct) {
         scale = Math.max(10, Math.min(100, pct));
         String[] m = mood == null ? null : find(mood);
-        if (m == null) return;
+        if (m == null) return; // nothing to dim with no mood or Lights off
         net.execute(() -> {
             if (before == null) return;
             JSONObject up = cloudDevice(UPLIGHTER);
@@ -209,12 +257,23 @@ final class RoomLights {
                 if (k > 0) goveeColour(ip, "k" + k);
                 else if (col != null) goveeColour(ip, String.format("#%02X%02X%02X", col.optInt("r"), col.optInt("g"), col.optInt("b")));
                 goveeBrightness(ip, s.optInt("brightness", 100));
-                if (s.optInt("onOff") == 0) goveeSend(ip, "turn", json("value", 0));
+                goveeSend(ip, "turn", json("value", s.optInt("onOff", 1)));
                 sleep(300);
             }
         }
+        // A lamp switched off can drop off the local network; Govee's cloud can still wake it.
+        for (Map.Entry<String, JSONObject> e : before.entrySet()) {
+            String ip = e.getKey();
+            if (ip.equals("bulb") || ip.equals("cloud") || UPLIGHTER.equals(skuOf.get(ip))) continue;
+            if (e.getValue().optInt("onOff", 1) == 1 && goveeStatus(ip) == null) {
+                JSONObject dev = cloudDevice(skuOf.get(ip));
+                if (dev != null && cloud(dev, "devices.capabilities.on_off", "powerSwitch", 1))
+                    android.util.Log.e(TAG, "lights on: woke " + skuOf.get(ip) + " through Govee's cloud");
+            }
+        }
         if (cloudUp) {
-            // Its three sections on or off as they were, then its brightness (and its white, if it had one).
+            // Power, its three sections on or off as they were, then its brightness (and its white, if it had one).
+            if (state.optInt("powerSwitch", 1) == 1) upSet(up, "devices.capabilities.on_off", "powerSwitch", 1);
             for (String t : new String[]{"sideLightToggle", "rippleLightToggle", "bottomLightToggle"})
                 if (state.has(t)) upSet(up, "devices.capabilities.toggle", t, state.optInt(t));
             if (state.optInt("brightness") > 0) upSet(up, "devices.capabilities.range", "brightness", state.optInt("brightness"));

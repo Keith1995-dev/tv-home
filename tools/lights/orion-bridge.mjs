@@ -7,6 +7,7 @@
 //   GET /snapshot   remember the bulb's current state (on/off, level, colour) and return it as JSON
 //   GET /set?on=1&level=0-254&hue=0-254&sat=0-254&mireds=153-500&t=tenths-of-a-second
 //   GET /restore    put the bulb back as /snapshot found it
+//   GET /state      the bulb's state now, without touching what /snapshot remembered
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { createRequire } from 'node:module';
@@ -28,6 +29,7 @@ shell.on('exit', code => { console.error('matter shell exited', code); process.e
 // Lines from the shell, so a command can wait for the line that answers it.
 let waiters = [];
 function onLine(line) {
+  if (/status: |Error|error|connect|session/i.test(line) && !/DEBUG/.test(line)) console.log('  shell:', line.slice(0, 220));
   for (const w of waiters) if (w.re.test(line)) { w.done(line); waiters = waiters.filter(x => x !== w); break; }
 }
 for (const s of [shell.stdout, shell.stderr]) {
@@ -52,7 +54,8 @@ function run(cmd, re, ms = 6000) {
   return p;
 }
 const invoke = (cluster, command, args) =>
-  run(`commands ${cluster} ${command} ${args ? `'${JSON.stringify(args)}' ` : ''}${NODE} ${EP}`, /status: |Error|error/i);
+  // Waits for the bulb's own answer ("Invoke « … status: Success"), which can take a few seconds after a reconnect.
+  run(`commands ${cluster} ${command} ${args ? `'${JSON.stringify(args)}' ` : ''}${NODE} ${EP}`, /Invoke « .* status: |Error/, 15000);
 async function read(cluster, attr) {
   const line = await run(`attributes ${cluster} read ${attr} ${NODE} ${EP}`, new RegExp(`Attribute value for ${attr} `, 'i'));
   if (!line) return null;
@@ -73,14 +76,18 @@ setInterval(() => { if (!connected) connect(); }, 60000);
 const opts = { optionsMask: 0, optionsOverride: 0 };
 let saved = null;
 
-async function snapshot() {
+async function readState() {
   const on = await read('onoff', 'onoff');
   if (on === null) throw new Error('bulb not answering');
-  saved = {
+  return {
     on, level: await read('levelcontrol', 'currentlevel'), mode: await read('colorcontrol', 'colormode'),
     hue: await read('colorcontrol', 'currenthue'), sat: await read('colorcontrol', 'currentsaturation'),
     mireds: await read('colorcontrol', 'colortemperaturemireds'),
   };
+}
+
+async function snapshot() {
+  saved = await readState();
   return saved;
 }
 
@@ -113,6 +120,7 @@ http.createServer(async (req, res) => {
   try {
     let out = { ok: true };
     if (url.pathname === '/snapshot') out = await snapshot();
+    else if (url.pathname === '/state') out = await readState();
     else if (url.pathname === '/set') await set(q);
     else if (url.pathname === '/restore') await restore();
     else { res.writeHead(404).end('{"error":"unknown"}'); return; }

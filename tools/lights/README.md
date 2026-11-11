@@ -1,10 +1,22 @@
 # Room moods
 
-The **◐ Moods** button in the home screen's top bar sets every light in the room to a mood: Action, Romance,
-Chill, Cozy, Party, Horror or Focus. A frosty wash of the mood's colours sweeps across the screen as it changes.
-The mood stays until you pick another, press **Lights off**, or turn the TV off; then every light goes back
-exactly as it was. Moods are defined in `RoomLights.MOODS` (launcher/src/com/mihir/tvhome/RoomLights.java).
+The **◐ Moods** button in the home screen's top bar opens **Room Ambience**: Action, Romance, Chill, Cozy, Party,
+Horror and Focus, plus **Lights off**. The running mood glows with a check; the remote's focus is a separate white
+ring, and only OK changes the lights. A mood stays until you pick another or turn the TV off (then every light goes
+back as it was). **Lights off** switches every light off and stays off; pick it again (it then says **Lights on**)
+to bring them back as they were. **Brightness** (Left / Right) scales the running mood on every light.
 
+| Mood | Uplighter (upper + middle, lower) | Other Govee lamps | Bulb |
+|---|---|---|---|
+| Action | red / blue alternating segments | blue | blue |
+| Romance | rose / deep magenta halves | rose | candle-warm 2200K, low |
+| Chill | Govee's Aurora scene | deep blue | dim cyan |
+| Cozy | Candlelight scene, warm white downlight | amber | warm 2200K |
+| Party | Dance Party scene | cyan | violet |
+| Horror | crimson / near-black pattern, dim | dark red | faint red |
+| Focus | light green / warm yellow, 5000K downlight | warm yellow | soft green-tinted white, bright |
+
+Moods are defined in `RoomLights.MOODS` (launcher/src/com/mihir/tvhome/RoomLights.java).
 Apple Home / Google Home / Alexa keep working as before.
 
 ## Govee lamps
@@ -13,10 +25,13 @@ Apple Home / Google Home / Alexa keep working as before.
   The TV finds them on the Wi-Fi and sets one colour and brightness per lamp.
 - **Govee API key** (optional, for more): Govee Home → **Profile** → gear → **Apply for API Key**; it arrives by
   email. Put it in `launcher/res/values/secrets.xml` as `govee_api_key`. This unlocks segment colours and Govee's
-  scenes through Govee's cloud. The Uplighter Floor Lamp (H60B0) uses it for its upward light (side and ripple
-  sections: Aurora for Chill, Candlelight for Cozy, red/blue segments for Action) while its downward lamp, which
-  is white only, switches off or to a warm or cool white. Govee allows about 10 commands a minute per lamp; a
-  mood uses five or six.
+  scenes through Govee's cloud. The Uplighter Floor Lamp (H60B0) has three sections: the upper "ripple" light
+  that throws patterns on the ceiling, the middle "side" glow (8 colour segments) and the lower white-only
+  downlight. Moods drive the first two through the cloud and switch the downlight off or to a white; with the
+  downlight on, the lamp turns its ripple off by itself. Its LAN colour command drives the colour sections, so
+  the uplighter is never restored over the LAN. Govee allows about 10 commands a minute per lamp: a mood sends
+  only what changes, and the uplighter retries every 20 seconds if Govee turns it away. A lamp that drops off the
+  Wi-Fi while off is woken through the cloud when the lights come back on.
 
 ## Matter bulbs (through a computer)
 

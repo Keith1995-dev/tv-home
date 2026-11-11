@@ -1236,7 +1236,7 @@ public class MainActivity extends Activity {
         String id = OverlayService.currentMood;
         String[] m = id == null ? null : RoomLights.find(id);
         boolean focused = moodPill.hasFocus() && moodPanel == null; // the panel has the remote while it's open
-        moodPill.setText("◐  " + (m == null ? "Moods" : m[1]));
+        moodPill.setText("◐  " + (m != null ? m[1] : RoomLights.OFF.equals(id) ? "Lights off" : "Moods"));
         if (m == null) {
             moodPill.setBackground(moodPillGlass);
             moodPillGlass.setLit(focused);
@@ -1261,7 +1261,7 @@ public class MainActivity extends Activity {
     private TextView brightValue, brightHint;
 
     private static final class MoodCard {
-        String id; // null = Lights off
+        String id; // a mood, or RoomLights.OFF
         View card;
         Halo halo;
         View badge;
@@ -1276,20 +1276,21 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setClipChildren(false);
         box.setClipToPadding(false);
-        box.setPadding(dp(18), dp(16), dp(18), dp(18));
-        // Opaque, so the busy background never shows through the text.
-        GradientDrawable panel = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFF1B1D24, 0xFF0F1015});
-        panel.setCornerRadius(dp(26));
-        panel.setStroke(dp(1), 0x24FFFFFF);
-        box.setBackground(panel);
+        box.setPadding(dp(14), dp(12), dp(14), dp(14));
+        // Dark frosted glass: the home screen's own frosted backdrop (this TV has no system blur), under a dark
+        // tint strong enough that the cards behind the panel (weather, team) don't show through the text.
+        GradientDrawable tint = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xE61A1C23, 0xF00C0D11});
+        tint.setCornerRadius(dp(22));
+        tint.setStroke(dp(1), 0x26FFFFFF);
+        box.setBackground(new android.graphics.drawable.LayerDrawable(new Drawable[]{new LiquidGlass(box, dp(22)), tint}));
 
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text(17, "sans-serif-medium", Color.WHITE);
+        TextView title = text(15, "sans-serif-medium", Color.WHITE);
         title.setText("Room Ambience");
-        TextView sub = text(10, "sans-serif", 0x8CFFFFFF);
+        TextView sub = text(9, "sans-serif", 0x8CFFFFFF);
         sub.setText("Set the perfect atmosphere");
         titles.addView(title);
         titles.addView(sub, llp(-2, -2, 0, dp(1), 0, 0));
@@ -1297,25 +1298,25 @@ public class MainActivity extends Activity {
         moodStatus = text(10, "sans-serif-medium", Color.WHITE);
         moodStatus.setPadding(dp(11), dp(5), dp(12), dp(5));
         head.addView(moodStatus, llp(-2, -2, dp(12), 0, 0, 0));
-        box.addView(head, llp(-1, -2, dp(2), 0, dp(2), dp(14)));
+        box.addView(head, llp(-1, -2, dp(2), 0, dp(2), dp(10)));
 
         List<String> ids = new ArrayList<>();
         for (String[] m : RoomLights.MOODS) ids.add(m[0]);
-        ids.add(null); // Lights off
+        ids.add(RoomLights.OFF);
         LinearLayout row = null;
         for (int i = 0; i < ids.size(); i++) {
             if (i % 4 == 0) {
                 row = new LinearLayout(this);
                 row.setClipChildren(false);
                 row.setClipToPadding(false);
-                box.addView(row, llp(-2, -2, 0, i == 0 ? 0 : dp(12), 0, 0));
+                box.addView(row, llp(-2, -2, 0, i == 0 ? 0 : dp(10), 0, 0));
             }
             String id = ids.get(i);
-            String[] m = id == null ? null : RoomLights.find(id);
+            String[] m = RoomLights.find(id);
             moodCards.add(moodCard(row, id, m == null ? "Lights off" : m[1], i % 4 != 0));
         }
 
-        box.addView(buildBrightnessRow(), llp(-1, -2, 0, dp(16), 0, 0));
+        box.addView(buildBrightnessRow(), llp(-1, -2, 0, dp(12), 0, 0));
 
         // Remote navigation: a plain 4 × 2 grid, Down from the bottom row to brightness, never out of the panel.
         for (int i = 0; i < moodCards.size(); i++) {
@@ -1335,7 +1336,7 @@ public class MainActivity extends Activity {
         refreshMoodPanel(false);
         pw.showAsDropDown(anchor, 0, dp(10), Gravity.START);
         MoodCard start = moodCards.get(moodCards.size() - 1);
-        for (MoodCard c : moodCards) if (c.id != null && c.id.equals(OverlayService.currentMood)) start = c;
+        for (MoodCard c : moodCards) if (c.id.equals(OverlayService.currentMood)) start = c;
         start.card.requestFocus();
     }
 
@@ -1348,28 +1349,28 @@ public class MainActivity extends Activity {
         card.setClickable(true);
         card.setId(View.generateViewId());
         card.setClipChildren(false);
-        card.setPadding(dp(6), dp(6), dp(6), dp(6));
+        card.setPadding(dp(5), dp(5), dp(5), dp(5));
         mc.bg = new GradientDrawable();
-        mc.bg.setCornerRadius(dp(18));
+        mc.bg.setCornerRadius(dp(15));
         mc.bg.setColor(0xFF1E2028);
         mc.bg.setStroke(dp(1), 0x1FFFFFFF);
         card.setBackground(mc.bg);
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        MoodArt art = new MoodArt(this, l, dp(13));
-        col.addView(art, new LinearLayout.LayoutParams(-1, dp(70)));
-        mc.label = text(12, "sans-serif-medium", 0xEBFFFFFF);
+        MoodArt art = new MoodArt(this, l, dp(11));
+        col.addView(art, new LinearLayout.LayoutParams(-1, dp(56)));
+        mc.label = text(11, "sans-serif-medium", 0xEBFFFFFF);
         mc.label.setText(name);
         mc.label.setGravity(Gravity.CENTER);
         mc.label.setSingleLine(true);
-        col.addView(mc.label, llp(-1, -2, 0, dp(7), 0, dp(3)));
+        col.addView(mc.label, llp(-1, -2, 0, dp(5), 0, dp(2)));
         card.addView(col, new FrameLayout.LayoutParams(-1, -2));
 
         // Active: a small check in the corner of the artwork.
         mc.badge = new CheckBadge(this, l.accent);
         mc.badge.setAlpha(0f);
-        card.addView(mc.badge, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP | Gravity.END));
+        card.addView(mc.badge, new FrameLayout.LayoutParams(dp(17), dp(17), Gravity.TOP | Gravity.END));
         ((FrameLayout.LayoutParams) mc.badge.getLayoutParams()).setMargins(0, dp(4), dp(4), 0);
 
         mc.halo = new Halo(this, l.accent);
@@ -1380,7 +1381,7 @@ public class MainActivity extends Activity {
             focusPop(v, has, 1.07f);
         });
         card.setOnClickListener(v -> pickMood(mc));
-        row.addView(withHalo(card, mc.halo), llp(dp(116), -2, gap ? dp(12) : 0, 0, 0, 0));
+        row.addView(withHalo(card, mc.halo), llp(dp(98), -2, gap ? dp(10) : 0, 0, 0, 0));
         return mc;
     }
 
@@ -1393,13 +1394,16 @@ public class MainActivity extends Activity {
     }
 
     private void pickMood(MoodCard mc) {
-        if (Objects.equals(mc.id, OverlayService.currentMood)) return; // already running
-        OverlayService.mood(this, mc.id);
-        OverlayService.currentMood = mc.id;
+        boolean lightsBack = RoomLights.OFF.equals(mc.id) && RoomLights.OFF.equals(OverlayService.currentMood);
+        if (!lightsBack && Objects.equals(mc.id, OverlayService.currentMood)) return; // already running
+        String id = lightsBack ? null : mc.id; // Lights off a second time: every light back as it was
+        OverlayService.mood(this, id);
+        OverlayService.currentMood = id;
         refreshMoodPanel(true);
         styleMoodPill();
-        MoodLook l = look(mc.id);
-        moodGlow(l.stops[0], l.stops[l.stops.length - 1]);
+        MoodLook l = look(id);
+        if (lightsBack) moodGlow(0x66FFF1DC, 0x40FFFFFF);
+        else moodGlow(l.stops[0], l.stops[l.stops.length - 1]);
     }
 
     /** Active glow and check on the running mood (pulsing in once when it changes), the status chip, brightness. */
@@ -1425,13 +1429,16 @@ public class MainActivity extends Activity {
                     .setDuration(animate ? 280 : 0).start();
             styleMoodCard(mc);
         }
-        String[] m = now == null ? null : RoomLights.find(now);
+        String[] m = RoomLights.find(now);
+        boolean off = RoomLights.OFF.equals(now);
         GradientDrawable chip = new GradientDrawable();
         chip.setCornerRadius(dp(14));
-        chip.setColor(m == null ? 0x1AFFFFFF : 0x2E2BD982);
+        chip.setColor(m != null ? 0x2E2BD982 : 0x1AFFFFFF);
         moodStatus.setBackground(chip);
-        moodStatus.setTextColor(m == null ? 0xB3FFFFFF : 0xFF6BEBA6);
-        moodStatus.setText(m == null ? "●  Lights normal" : "●  " + m[1] + " on");
+        moodStatus.setTextColor(m != null ? 0xFF6BEBA6 : 0xB3FFFFFF);
+        moodStatus.setText(m != null ? "●  " + m[1] + " on" : off ? "●  Lights off" : "●  Lights normal");
+        // The Off card says what OK will do next.
+        for (MoodCard mc : moodCards) if (RoomLights.OFF.equals(mc.id)) mc.label.setText(off ? "Lights on" : "Lights off");
         updateBrightness();
     }
 
@@ -1443,10 +1450,10 @@ public class MainActivity extends Activity {
     private View buildBrightnessRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(16), dp(11), dp(16), dp(13));
+        row.setPadding(dp(14), dp(9), dp(14), dp(11));
         row.setId(View.generateViewId());
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(16));
+        bg.setCornerRadius(dp(14));
         bg.setColor(0x14FFFFFF);
         bg.setStroke(dp(1), 0x14FFFFFF);
         row.setBackground(bg);
@@ -1454,14 +1461,14 @@ public class MainActivity extends Activity {
         top.setGravity(Gravity.CENTER_VERTICAL);
         MoodIcon sun = new MoodIcon(this, "sun", 0xD9FFFFFF);
         top.addView(sun, new LinearLayout.LayoutParams(dp(16), dp(16)));
-        TextView name = text(12, "sans-serif-medium", 0xE6FFFFFF);
+        TextView name = text(11, "sans-serif-medium", 0xE6FFFFFF);
         name.setText("Brightness");
         top.addView(name, llp(-2, -2, dp(9), 0, 0, 0));
         brightHint = text(9, "sans-serif-medium", 0x80FFFFFF);
         brightHint.setLetterSpacing(0.1f);
         top.addView(brightHint, llp(0, -2, dp(10), 0, 0, 0));
         ((LinearLayout.LayoutParams) brightHint.getLayoutParams()).weight = 1f;
-        brightValue = text(12, "sans-serif-medium", 0xE6FFFFFF);
+        brightValue = text(11, "sans-serif-medium", 0xE6FFFFFF);
         top.addView(brightValue);
         row.addView(top);
         FrameLayout track = new FrameLayout(this);
@@ -1471,7 +1478,7 @@ public class MainActivity extends Activity {
         track.setBackground(tg);
         brightFill = new View(this);
         track.addView(brightFill, new FrameLayout.LayoutParams(0, -1));
-        row.addView(track, llp(-1, dp(6), 0, dp(10), 0, 0));
+        row.addView(track, llp(-1, dp(5), 0, dp(8), 0, 0));
         track.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> { if (r - l != or - ol) updateBrightness(); });
         row.setOnFocusChangeListener((v, has) -> {
             bg.setStroke(has ? dp(2.5f) : dp(1), has ? 0xF2FFFFFF : 0x14FFFFFF);
@@ -1480,7 +1487,7 @@ public class MainActivity extends Activity {
         });
         row.setOnKeyListener((v, code, e) -> {
             if (code != KeyEvent.KEYCODE_DPAD_LEFT && code != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
-            if (e.getAction() == KeyEvent.ACTION_DOWN && OverlayService.currentMood != null) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && RoomLights.find(OverlayService.currentMood) != null) {
                 moodBright = Math.max(10, Math.min(100, moodBright + (code == KeyEvent.KEYCODE_DPAD_RIGHT ? 10 : -10)));
                 updateBrightness();
                 handler.removeCallbacks(sendBright);
@@ -1494,7 +1501,7 @@ public class MainActivity extends Activity {
 
     private void updateBrightness() {
         if (brightRow == null) return;
-        boolean on = OverlayService.currentMood != null;
+        boolean on = RoomLights.find(OverlayService.currentMood) != null; // a mood, not normal or Lights off
         brightRow.setFocusable(on);
         brightRow.setAlpha(on ? 1f : 0.45f);
         brightValue.setText(on ? moodBright + "%" : "—");
