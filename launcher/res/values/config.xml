@@ -72,10 +72,6 @@
          the sender and a short reason show, never the email itself. -->
     <bool name="delivery_banner">true</bool>
     <bool name="urgent_banner">true</bool>
-    <!-- Movie lights: while something plays in another app, Govee lamps with LAN Control fade to a colour Claude
-         picks for the title and a Matter bulb (via tools/lights, lights_bridge_url) goes off; pause brings them up
-         to a warm 30%; stopping puts every light back as it was. Lights that were off are left alone. -->
-    <bool name="movie_lights">true</bool>
     <!-- A banner when it's dry now but rain starts at home within 45 minutes (Open-Meteo, at most every 3 hours). -->
     <bool name="rain_alert">true</bool>
 

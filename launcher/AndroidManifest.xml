@@ -55,14 +55,6 @@
 
         <service android:name=".OverlayService" android:exported="false" />
 
-        <!-- Lets the movie lights see what's playing in other apps; access is granted over ADB at install. -->
-        <service android:name=".MediaWatch" android:exported="true"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
         <!-- A tile in Google TV's apps row, so the Google TV pill has a way back. -->
         <activity-alias
             android:name=".AppsRowEntry"

@@ -91,21 +91,34 @@ public class OverlayService extends Service {
         android.content.IntentFilter sf = new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
         sf.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(screenOn, sf);
-        if (getResources().getBoolean(R.bool.movie_lights)) {
-            movieLights = new MovieLights(this, handler);
-            movieLights.start();
-        }
     }
-
-    private MovieLights movieLights;
 
     @Override
     public int onStartCommand(Intent i, int flags, int id) {
+        if (i != null && "mood".equals(i.getAction())) {
+            if (lights == null) lights = new RoomLights(this);
+            lights.set(i.getStringExtra("id"));
+            currentMood = lights.mood();
+        }
         if (i != null && "music".equals(i.getAction())) {
             String url = i.getStringExtra("url");
             if (url == null) stopMusic(); else playMusic(url, i.getStringExtra("name"));
         }
         return START_STICKY;
+    }
+
+    // ---------------------------------------------------------------- room moods
+
+    private RoomLights lights;
+    static volatile String currentMood; // the mood that's on, for the home screen; null = lights as you left them
+
+    /** Set a mood (RoomLights.MOODS id) on every light, or null to put them all back. Lasts until the TV goes off. */
+    static void mood(Context c, String id) {
+        try {
+            c.startForegroundService(new Intent(c, OverlayService.class).setAction("mood").putExtra("id", id));
+        } catch (RuntimeException e) {
+            android.util.Log.e(TAG, "mood: " + e.getMessage());
+        }
     }
 
     // ---------------------------------------------------------------- focus music
@@ -160,7 +173,6 @@ public class OverlayService extends Service {
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         unregisterReceiver(screenOn);
-        if (movieLights != null) movieLights.stop();
         stopMusic();
         hideTicker();
         if (running == this) running = null;
@@ -335,7 +347,7 @@ public class OverlayService extends Service {
         @Override public void onReceive(Context c, Intent i) {
             if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) { // TV off: radio off, lights back to normal
                 stopMusic();
-                if (movieLights != null) movieLights.screenOff();
+                if (lights != null && lights.mood() != null) { lights.set(null); currentMood = null; }
                 return;
             }
             handler.removeCallbacks(wakeBriefing);

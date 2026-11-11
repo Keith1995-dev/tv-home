@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
         startWatchFeeds();
         OverlayService.start(this);
         OverlayService.setHomeShowing(true);
+        if (moodPill != null) updateMoodPill(); // turning the TV off ends the mood
         personalPage.start();
         handler.postDelayed(maybeBriefing, 1500);
         loadRecs(false);
@@ -409,7 +410,9 @@ public class MainActivity extends Activity {
             recsJump = true;
             loadRecs(true);
         });
-        List<TextView> row = new ArrayList<>(Arrays.asList(inputs, saver, picks, wifiPill, settings, update));
+        moodPill = pill("Moods", "◐");
+        moodPill.setOnClickListener(v -> showMoods(v));
+        List<TextView> row = new ArrayList<>(Arrays.asList(inputs, saver, moodPill, picks, wifiPill, settings, update));
         if (isInstalled(GOOGLE_TV)) {
             TextView gtv = pill("Google TV", "▣");
             gtv.setOnClickListener(v -> openGoogleTv());
@@ -1176,6 +1179,118 @@ public class MainActivity extends Activity {
         CharSequence c = t.loadCustomLabel(this);
         if (c == null || c.length() == 0) c = t.loadLabel(this);
         return String.valueOf(c);
+    }
+
+    // ---------------------------------------------------------------- room moods
+
+    // A mood sets every light in the room (RoomLights) until another is picked, Lights off, or the TV goes off.
+    private TextView moodPill;
+
+    /** The swatch colour for a mood colour: #RRGGBB as is, kNNNN whites as a warm-to-cool tint. */
+    private static int moodColour(String c) {
+        if (!c.startsWith("k")) return Color.parseColor(c);
+        int k = Integer.parseInt(c.substring(1));
+        return k <= 2500 ? 0xFFFFB46B : k <= 3500 ? 0xFFFFD6A6 : k <= 4500 ? 0xFFFFE9D2 : 0xFFEEF2FF;
+    }
+
+    private void updateMoodPill() {
+        String id = OverlayService.currentMood;
+        String[] m = id == null ? null : RoomLights.find(id);
+        moodPill.setText("◐  " + (m == null ? "Moods" : m[1]));
+    }
+
+    private void showMoods(View anchor) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(12), dp(12));
+        box.setBackground(glass(dp(20), GLASS_DARK));
+        TextView head = text(9, "sans-serif-medium", 0x99FFFFFF);
+        head.setLetterSpacing(0.22f);
+        head.setText("ROOM MOOD");
+        box.addView(head, llp(-2, -2, dp(4), 0, 0, dp(8)));
+        PopupWindow pw = new PopupWindow(box, -2, -2, true);
+        List<View> tiles = new ArrayList<>();
+        LinearLayout row = null;
+        int n = 0;
+        for (String[] m : RoomLights.MOODS) {
+            if (n++ % 4 == 0) { row = new LinearLayout(this); box.addView(row, llp(-2, -2, 0, n == 1 ? 0 : dp(8), 0, 0)); }
+            tiles.add(moodTile(row, m[1], moodColour(m[9]), moodColour(m[10]), m[0].equals(OverlayService.currentMood), () -> {
+                pw.dismiss();
+                OverlayService.mood(this, m[0]);
+                OverlayService.currentMood = m[0];
+                updateMoodPill();
+                moodGlow(moodColour(m[9]), moodColour(m[10]));
+            }));
+        }
+        tiles.add(moodTile(row, "Lights off", 0xFF3A3D45, 0xFF15161A, false, () -> {
+            pw.dismiss();
+            OverlayService.mood(this, null);
+            OverlayService.currentMood = null;
+            updateMoodPill();
+            moodGlow(0x99FFFFFF, 0x55FFFFFF);
+        }));
+        pw.setOutsideTouchable(true);
+        pw.setElevation(dp(16));
+        pw.setOnDismissListener(anchor::requestFocus);
+        pw.showAsDropDown(anchor, 0, dp(8), Gravity.START);
+        int at = 0;
+        for (int i = 0; i < RoomLights.MOODS.length; i++) if (RoomLights.MOODS[i][0].equals(OverlayService.currentMood)) at = i;
+        tiles.get(at).requestFocus();
+    }
+
+    /** A glass tile with the mood's two colours as a soft gradient swatch and its name under it. */
+    private View moodTile(LinearLayout row, String name, int a, int b, boolean on, Runnable pick) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setPadding(dp(8), dp(8), dp(8), dp(8));
+        tile.setFocusable(true);
+        tile.setClickable(true);
+        tile.setId(View.generateViewId());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(14));
+        bg.setColor(0x1AFFFFFF);
+        if (on) bg.setStroke(dp(2), 0xE6FFFFFF);
+        tile.setBackground(bg);
+        View swatch = new View(this);
+        GradientDrawable sw = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{a, b});
+        sw.setCornerRadius(dp(9));
+        swatch.setBackground(sw);
+        tile.addView(swatch, new LinearLayout.LayoutParams(-1, dp(40)));
+        TextView t = text(11, "sans-serif-medium", Color.WHITE);
+        t.setText(name);
+        t.setGravity(Gravity.CENTER);
+        tile.addView(t, llp(-1, -2, 0, dp(6), 0, 0));
+        tile.setOnFocusChangeListener((v, has) -> {
+            bg.setColor(has ? 0xF2FFFFFF : 0x1AFFFFFF);
+            t.setTextColor(has ? 0xFF111111 : Color.WHITE);
+            focusPop(v, has, 1.06f);
+        });
+        tile.setOnClickListener(v -> pick.run());
+        row.addView(tile, llp(dp(104), -2, row.getChildCount() == 0 ? 0 : dp(8), 0, 0, 0));
+        return tile;
+    }
+
+    /** A frosty wash of the mood's colours across the whole screen, with a pale sheen sweeping through it. */
+    private void moodGlow(int a, int b) {
+        View wash = new View(this);
+        wash.setBackground(new GradientDrawable(GradientDrawable.Orientation.BL_TR,
+                new int[]{withAlpha(a, 0.55f), withAlpha(0xFFFFFFFF, 0.16f), withAlpha(b, 0.55f)}));
+        View sheen = new View(this);
+        sheen.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0x00FFFFFF, 0x40FFFFFF, 0x00FFFFFF}));
+        int w = getResources().getDisplayMetrics().widthPixels;
+        rootView.addView(wash, new FrameLayout.LayoutParams(-1, -1));
+        rootView.addView(sheen, new FrameLayout.LayoutParams(w / 3, -1));
+        wash.setAlpha(0f);
+        wash.setScaleX(1.06f);
+        wash.setScaleY(1.06f);
+        sheen.setRotation(12f);
+        sheen.setTranslationX(-w / 2f);
+        wash.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(SOFT).withLayer()
+                .withEndAction(() -> wash.animate().alpha(0f).setStartDelay(500).setDuration(1100).withLayer()
+                        .withEndAction(() -> rootView.removeView(wash)).start()).start();
+        sheen.animate().translationX(w * 1.2f).setDuration(1400).setInterpolator(SOFT).withLayer()
+                .withEndAction(() -> rootView.removeView(sheen)).start();
     }
 
     // ---------------------------------------------------------------- screensaver on demand

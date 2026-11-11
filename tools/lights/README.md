@@ -1,16 +1,22 @@
-# Movie lights
+# Room moods
 
-While something plays in another app on the TV, the lamps fade to a colour Claude picks for the title (Dune:
-desert orange) and the room bulb goes off. Pause brings everything up to a warm 30% for a snack run; stopping, or
-turning the TV off, puts every light back exactly as it was. Lights that were off when the film started are left
-alone, and the lamps never end up brighter than you had them. Turn it off with `movie_lights` in `config.xml`.
+The **◐ Moods** button in the home screen's top bar sets every light in the room to a mood: Action, Romance,
+Chill, Cozy, Party, Horror or Focus. A frosty wash of the mood's colours sweeps across the screen as it changes.
+The mood stays until you pick another, press **Lights off**, or turn the TV off; then every light goes back
+exactly as it was. Moods are defined in `RoomLights.MOODS` (launcher/src/com/mihir/tvhome/RoomLights.java).
 
-Nothing here needs a cloud account or a hub, and Apple Home / Google Home / Alexa keep working as before.
+Apple Home / Google Home / Alexa keep working as before.
 
-## Govee lamps (direct from the TV)
+## Govee lamps
 
-In the **Govee Home** app open each lamp → gear icon → turn on **LAN Control**. That's all: the TV finds them on
-the Wi-Fi by itself. Not every Govee model has LAN Control; those that don't can't be used.
+- **LAN Control** (fast, no account): in the **Govee Home** app open each lamp → gear icon → turn on **LAN Control**.
+  The TV finds them on the Wi-Fi and sets one colour and brightness per lamp.
+- **Govee API key** (optional, for more): Govee Home → **Profile** → gear → **Apply for API Key**; it arrives by
+  email. Put it in `launcher/res/values/secrets.xml` as `govee_api_key`. This unlocks segment colours and Govee's
+  scenes through Govee's cloud. The Uplighter Floor Lamp (H60B0) uses it for its upward light (side and ripple
+  sections: Aurora for Chill, Candlelight for Cozy, red/blue segments for Action) while its downward lamp, which
+  is white only, switches off or to a warm or cool white. Govee allows about 10 commands a minute per lamp; a
+  mood uses five or six.
 
 ## Matter bulbs (through a computer)
 
@@ -41,5 +47,3 @@ computer is awake.
 
 4. Put `http://<computer's IP>:8766?key=<the key>` in `launcher/res/values/secrets.xml` as `lights_bridge_url` and
    rebuild.
-
-The launcher also needs notification access to see what's playing; `launcher/build-and-install.sh` grants it.

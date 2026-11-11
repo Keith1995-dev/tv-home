@@ -1,4 +1,4 @@
-// Matter bulb bridge for the TV's movie lights: keeps a matter.js controller shell connected to the bulb and
+// Matter bulb bridge for the TV's room moods: keeps a matter.js controller shell connected to the bulb and
 // turns small HTTP calls from the TV into Matter commands. Runs on a computer on the same Wi-Fi.
 //
 //   node tools/lights/orion-bridge.mjs            (see tools/lights/README.md for setup)

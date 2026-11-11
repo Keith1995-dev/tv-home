@@ -83,9 +83,9 @@ Undo everything with `tools/restore.sh <the same list>`.
   subscription that charges tomorrow, and rain starting within 45 minutes. During a live game a small
   score ticker sits in the corner (select the team card on Home and press OK to hide it for that game),
   and the morning briefing shows when the TV wakes up in another app.
-- **Movie lights**: when a film or show plays, Govee lamps fade to a colour Claude picks for the title and the
-  room's Matter bulb goes off; pause brings them up to a warm 30%, and stopping puts every light back
-  ([setup](tools/lights/README.md)).
+- **Room moods**: a Moods button sets every light to Action, Romance, Chill (Govee's Aurora on the uplighter),
+  Cozy, Party, Horror or Focus with a frosty sweep across the screen; Lights off or turning the TV off puts
+  them back ([setup](tools/lights/README.md)).
 - **Screensaver on demand**: the mountain button in the top bar plays any downloaded aerial, or just
   paintings, Earth View or space pictures, straight away.
 - **Work → Music**: focus and sleep radio that keeps playing while you look around, and Ask understands
