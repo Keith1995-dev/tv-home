@@ -1105,6 +1105,7 @@ public class MainActivity extends Activity {
             c.setNextFocusRightId(i == d - 1 ? c.getId() : dockCards.get(i + 1).getId());
             c.setNextFocusDownId(c.getId()); // wireRecs points it at Discover once there are picks
         }
+        wireTeamFocus();
         // Drawer: the recent row sits above the A-Z grid; focus never leaves the sheet.
         int rc = recentCards.size();
         for (int k = 0; k < rc; k++) {
@@ -4363,6 +4364,18 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
+    /** During a game, Up from the right half of the dock reaches the Warriors card; otherwise it goes to the top bar. */
+    private void wireTeamFocus() {
+        if (teamCard == null || pills.isEmpty()) return;
+        int d = dockCards.size();
+        for (int i = 0; i < d; i++)
+            dockCards.get(i).setNextFocusUpId(teamLive && i >= d / 2 ? teamCard.getId() : pills.get(0).getId());
+        teamCard.setNextFocusDownId(d > 0 ? dockCards.get(Math.min(d - 1, d * 3 / 4)).getId() : teamCard.getId());
+        teamCard.setNextFocusUpId(pills.get(pills.size() - 1).getId());
+        teamCard.setNextFocusLeftId(teamCard.getId());
+        teamCard.setNextFocusRightId(teamCard.getId());
+    }
+
     /** The ticker is hidden per game: the id goes in ticker_hidden_game, so the next game shows it again. */
     private void toggleTicker() {
         if (liveGameId == null) return;
@@ -4375,7 +4388,7 @@ public class MainActivity extends Activity {
         if (teamCard.hasFocus() && liveGameId != null) {
             boolean hidden = liveGameId.equals(prefs().getString("ticker_hidden_game", ""));
             teamLine2.setText(hidden ? "OK  ·  show the score over other apps" : "OK  ·  hide the score over other apps");
-            teamLine2.setTextColor(0xFFFFFFFF);
+            teamLine2.setTextColor(0xE6101216); // dark, on the lit glass
         } else {
             teamLine2.setText(teamInfo);
             teamLine2.setTextColor(0xB3FFFFFF);
@@ -4424,6 +4437,7 @@ public class MainActivity extends Activity {
             liveGameId = live == null ? null : live.getString("id");
             if (!teamLive && teamCard.hasFocus() && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
             teamCard.setFocusable(teamLive);
+            wireTeamFocus();
             applyGameDay();
             if (last != null) showRecap(last, us);
             if (live != null) {
