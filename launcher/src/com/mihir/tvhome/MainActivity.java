@@ -1942,8 +1942,9 @@ public class MainActivity extends Activity {
                 .put(new org.json.JSONObject().put("role", "user").put("content", prompt));
         String text = "";
         for (int turn = 0; turn < 4; turn++) {
-            // The newer web search isn't offered on every model; a model that turns it down gets the basic one.
-            String search = prefs().getBoolean("basic_web_search", false) ? "web_search_20250305" : "web_search_20260209";
+            // Haiku gets the basic web search (it fumbles the newer one's inputs); so does a model that turns it down.
+            String search = getString(R.string.claude_model).contains("haiku") || prefs().getBoolean("basic_web_search", false)
+                    ? "web_search_20250305" : "web_search_20260209";
             org.json.JSONObject body = new org.json.JSONObject()
                     .put("model", getString(R.string.claude_model))
                     .put("max_tokens", 8000)
