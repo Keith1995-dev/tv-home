@@ -383,6 +383,9 @@ public class MainActivity extends Activity {
         for (String[] city : WORLD_CLOCKS) world.addView(worldClock(city[0], city[1]), llp(-2, -2, 0, 0, dp(10), 0));
         left.addView(world, llp(-2, -2, 0, dp(14), 0, 0));
         left.addView(buildFactLine(), llp(dp(320), -2, dp(2), dp(12), 0, 0));
+        String gta = getString(R.string.gta6_unlock).trim();
+        long gtaAt = gta.isEmpty() ? 0 : java.time.Instant.parse(gta).toEpochMilli();
+        if (GtaCountdown.relevant(gtaAt)) left.addView(new GtaCountdown(this, gtaAt), llp(dp(400), dp(83), 0, dp(12), 0, 0));
 
         recsStatus = text(11, "sans-serif-medium", 0xFF8FD4FF);
         recsStatus.setMaxLines(4);
@@ -1913,7 +1916,9 @@ public class MainActivity extends Activity {
                 toast(err[0] == null ? "Discover updated" : "Partly updated: " + err[0]);
             } catch (Exception e) {
                 recsJump = false;
-                toast("Discover failed: " + e.getMessage());
+                String m = String.valueOf(e.getMessage());
+                toast(m.contains("credit balance") ? "Discover is paused: the Claude API account is out of credits"
+                        : "Discover failed: " + m);
             } finally {
                 recsLoading = false;
             }
