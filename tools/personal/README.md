@@ -52,4 +52,4 @@ the web invalidates the key.
 - Run `resetFeed` to forget everything and re-read the mail right away (do this after changing the searches).
 - The deployment must be **Execute as: Me** and **Who has access: Anyone**. "Anyone with a Google Account"
   makes Google answer the TV with a sign-in page.
-- Cost: only new mail goes to Claude, so it's usually a few small calls a day (`claude-sonnet-5-5`).
+- Cost: only new mail goes to Claude, so it's usually a few small calls a day (`claude-haiku-5-5`).

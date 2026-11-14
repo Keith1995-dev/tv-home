@@ -47,7 +47,7 @@
          res/values/secrets.xml, which stays on your machine. The build creates it from launcher/secrets.example.xml. -->
 
     <!-- Model used for the OTT picks and top 10s (needs web search support). -->
-    <string name="claude_model" translatable="false">claude-sonnet-5-5</string>
+    <string name="claude_model" translatable="false">claude-haiku-5-5</string>
 
     <!-- Unit the forecast is fetched in; the screen always shows °C first with °F beside it. -->
     <string name="temperature_unit" translatable="false">celsius</string>

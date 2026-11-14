@@ -381,11 +381,14 @@ public class MainActivity extends Activity {
 
         LinearLayout world = new LinearLayout(this);
         for (String[] city : WORLD_CLOCKS) world.addView(worldClock(city[0], city[1]), llp(-2, -2, 0, 0, dp(10), 0));
+        world.setPivotX(0);
+        world.setPivotY(0);
+        world.setScaleX(WIDGET_SCALE);
+        world.setScaleY(WIDGET_SCALE);
         left.addView(world, llp(-2, -2, 0, dp(14), 0, 0));
         left.addView(buildFactLine(), llp(dp(320), -2, dp(2), dp(12), 0, 0));
-        String gta = getString(R.string.gta6_unlock).trim();
-        long gtaAt = gta.isEmpty() ? 0 : java.time.Instant.parse(gta).toEpochMilli();
-        if (GtaCountdown.relevant(gtaAt)) left.addView(new GtaCountdown(this, gtaAt), llp(dp(400), dp(83), 0, dp(12), 0, 0));
+        long gtaAt = GtaCountdown.unlockAt(this);
+        if (GtaCountdown.relevant(gtaAt)) left.addView(new GtaCountdown(this, gtaAt), llp(dp(360), dp(75), 0, dp(8), 0, 0));
 
         recsStatus = text(11, "sans-serif-medium", 0xFF8FD4FF);
         recsStatus.setMaxLines(4);
@@ -431,8 +434,16 @@ public class MainActivity extends Activity {
         rightCol.setGravity(Gravity.END);
         rightCol.setClipChildren(false);
         rightCol.addView(right, llp(-2, -2, 0, 0, 0, 0));
-        rightCol.addView(buildWeatherCard(), llp(dp(280), -2, 0, dp(12), 0, 0));
-        rightCol.addView(buildTeamCard(), llp(dp(280), -2, 0, dp(8), 0, 0));
+        // The cards are drawn a little smaller than they're laid out, shrinking towards the top right corner.
+        LinearLayout cards = new LinearLayout(this);
+        cards.setOrientation(LinearLayout.VERTICAL);
+        cards.setClipChildren(false);
+        cards.addView(buildWeatherCard(), llp(dp(280), -2, 0, 0, 0, 0));
+        cards.addView(buildTeamCard(), llp(dp(280), -2, 0, dp(8), 0, 0));
+        cards.setScaleX(WIDGET_SCALE);
+        cards.setScaleY(WIDGET_SCALE);
+        cards.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> { v.setPivotX(r - l); v.setPivotY(0); });
+        rightCol.addView(cards, llp(-2, -2, 0, dp(12), 0, 0));
         header.addView(rightCol, new FrameLayout.LayoutParams(-2, -2, Gravity.END | Gravity.TOP));
         return header;
     }
@@ -764,7 +775,8 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- apps
 
-    private static final int DOCK_TILE_W = 112; // dp; 16:9 banners, about 75% of the old full-width tiles
+    private static final int DOCK_TILE_W = 100; // dp; 16:9 banners
+    private static final float WIDGET_SCALE = 0.9f; // Home's clocks and cards, against their laid-out size
 
     private void buildApps() {
         PackageManager pm = getPackageManager();
@@ -808,7 +820,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i <= dock.size(); i++) {
             View tile = i < dock.size() ? tile(dock.get(i), TILE_DOCK) : allAppsTile();
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(tileW), -2);
-            p.setMargins(i == 0 ? 0 : dp(9), 0, i == dock.size() ? 0 : dp(9), 0);
+            p.setMargins(i == 0 ? 0 : dp(8), 0, i == dock.size() ? 0 : dp(8), 0);
             dockRow.addView(tile, p);
         }
 
@@ -1930,12 +1942,14 @@ public class MainActivity extends Activity {
                 .put(new org.json.JSONObject().put("role", "user").put("content", prompt));
         String text = "";
         for (int turn = 0; turn < 4; turn++) {
+            // The newer web search isn't offered on every model; a model that turns it down gets the basic one.
+            String search = prefs().getBoolean("basic_web_search", false) ? "web_search_20250305" : "web_search_20260209";
             org.json.JSONObject body = new org.json.JSONObject()
                     .put("model", getString(R.string.claude_model))
                     .put("max_tokens", 8000)
                     .put("output_config", new org.json.JSONObject().put("effort", "low"))
                     .put("tools", new org.json.JSONArray().put(new org.json.JSONObject()
-                            .put("type", "web_search_20260209").put("name", "web_search").put("max_uses", 6)
+                            .put("type", search).put("name", "web_search").put("max_uses", 6)
                             .put("user_location", new org.json.JSONObject()
                                     .put("type", "approximate").put("country", "IN"))))
                     .put("messages", messages);
@@ -1956,6 +1970,11 @@ public class MainActivity extends Activity {
             int n;
             while (is != null && (n = is.read(buf)) > 0) bo.write(buf, 0, n);
             String resp = bo.toString("UTF-8");
+            if (code == 400 && resp.contains("web_search") && search.endsWith("20260209")) {
+                prefs().edit().putBoolean("basic_web_search", true).apply();
+                turn--;
+                continue;
+            }
             if (code != 200) throw new java.io.IOException("HTTP " + code + " " + resp.substring(0, Math.min(160, resp.length())));
             org.json.JSONObject r = new org.json.JSONObject(resp);
             org.json.JSONArray content = r.getJSONArray("content");
@@ -3992,6 +4011,8 @@ public class MainActivity extends Activity {
         card.addView(day, llp(-2, -2, 0, dp(2), 0, dp(14)));
 
         List<String[]> lines = new ArrayList<>();
+        String gta = GtaCountdown.todayLine(this);
+        if (gta != null) lines.add(new String[]{"🌴", gta});
         if (wxTemp != null && wxTemp.getText().length() > 0) {
             lines.add(new String[]{wxIcon.getText().toString(), wxTemp.getText() + " " + wxCond.getText() + "  ·  " + wxRange.getText()
                     + "\n" + tennisTitle.getText().toString().toLowerCase(Locale.getDefault()) + ": " + tennisVerdict.getText()});

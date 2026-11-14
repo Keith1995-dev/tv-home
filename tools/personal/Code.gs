@@ -9,7 +9,7 @@
  * Setup: see README.md next to this file.
  */
 
-const MODEL = 'claude-sonnet-5-5';
+const MODEL = 'claude-haiku-5-5';
 // Most specific first: each run reads at most MAX_PER_RUN emails, in this order, so trips and orders never
 // wait behind a busy inbox.
 const QUERIES = [
