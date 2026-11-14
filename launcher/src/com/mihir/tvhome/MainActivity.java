@@ -3230,7 +3230,9 @@ public class MainActivity extends Activity {
     private void updateClock() {
         Calendar now = Calendar.getInstance();
         int h = now.get(Calendar.HOUR_OF_DAY);
-        greeting.setText(h < 5 ? "GOOD NIGHT" : h < 12 ? "GOOD MORNING" : h < 17 ? "GOOD AFTERNOON" : "GOOD EVENING");
+        String name = ownerName();
+        greeting.setText((h < 5 ? "GOOD NIGHT" : h < 12 ? "GOOD MORNING" : h < 17 ? "GOOD AFTERNOON" : "GOOD EVENING")
+                + (name.isEmpty() ? "" : ", " + name.toUpperCase(java.util.Locale.ROOT)));
         boolean is24 = android.text.format.DateFormat.is24HourFormat(this);
         clock.setText(new SimpleDateFormat(is24 ? "H:mm" : "h:mm", Locale.getDefault()).format(now.getTime()));
         ampm.setText(is24 ? "" : (h < 12 ? "AM" : "PM"));
@@ -3982,7 +3984,7 @@ public class MainActivity extends Activity {
         liquid(card, dp(26));
         briefing.addView(card, new FrameLayout.LayoutParams(dp(600), -2, Gravity.CENTER));
         TextView hi = text(24, "sans-serif-light", Color.WHITE);
-        hi.setText("Good morning");
+        hi.setText(ownerName().isEmpty() ? "Good morning" : "Good morning, " + ownerName());
         card.addView(hi);
         TextView day = text(9, "sans-serif-medium", 0x99FFFFFF);
         day.setLetterSpacing(0.22f);
@@ -5406,6 +5408,12 @@ public class MainActivity extends Activity {
         t.setTypeface(Typeface.create(family, Typeface.NORMAL));
         t.setTextColor(color);
         return t;
+    }
+
+    /** Your first name for greetings, from secrets.xml owner_name (empty = no name). */
+    private String ownerName() {
+        int id = getResources().getIdentifier("owner_name", "string", getPackageName());
+        return id == 0 ? "" : getString(id).trim();
     }
 
     private int dp(float v) {

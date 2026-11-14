@@ -26,9 +26,29 @@ final class GtaCountdown extends View {
             "Tell work you're sick on the 19th.",
             "Pre-load ready? Check the PS5.",
             "Sunglasses on. Sun's not down yet.",
-            "The beach is calling.",
             "Snacks stocked? Asking for a friend.",
             "Twelve years of waiting. Almost there.",
+            "Your social life has been placed on hold.",
+            "Plants, pets, people: water them all now.",
+            "Last chance to touch grass.",
+            "Hydrate now. You won't remember to later.",
+            "Practising the speed limit. Ironically.",
+            "Booked sick leave in pencil. And pen.",
+            "Mom, I'll eat dinner later. Much later.",
+            "Your bed will miss you. Briefly.",
+            "Uninstalling anything that isn't this.",
+            "Pizza place has you on speed dial.",
+            "Estimated sleep next week: optional.",
+            "Somewhere, a trailer is being rewatched.",
+            "The couch has been informed.",
+            "Group chat status: going dark soon.",
+            "Free up 150 GB. Sorry, old games.",
+            "Delivery drivers, stand by.",
+            "Practising your innocent face for the cops.",
+            "Five stars is a goal, not a warning.",
+            "Brace yourself, bank account. Again.",
+            "The wait is almost over. Unlike the trailer views.",
+            "Remember daylight? Enjoy it while it lasts.",
     };
     private static final long DAY = 86_400_000L;
     private static final float W = 500, H = 104, HORIZON = 0.78f;
@@ -146,14 +166,13 @@ final class GtaCountdown extends View {
         float x0 = 26 * d;
         // Title: GTA VI with a pink neon glow, and when.
         text(c, "GTA VI", x0, 38 * d, 28 * d, black, Color.WHITE, 0xFFFF3D9A, 10 * d);
-        text(c, "UNLOCKS IN INDIA  ·  THU 19 NOV", x0 + 2 * d, 54 * d, 8.5f * d, label, 0xE6FFFFFF, 0, 0);
 
         // Wanted level: a star a day for the last five days, the next one blinking.
         int lit = (int) Math.max(0, Math.min(5, 5 - Math.ceil(left / (double) DAY) + 1));
         boolean blink = (System.currentTimeMillis() / 500) % 2 == 0;
         for (int i = 0; i < 5; i++) {
             boolean on = i < lit || (i == lit && blink);
-            star(c, x0 + 6 * d + i * 15 * d, 70 * d, 5.5f * d, on ? 0xFFFFD84D : 0x55FFFFFF, on && i < lit);
+            star(c, x0 + 6 * d + i * 15 * d, 60 * d, 5.5f * d, on ? 0xFFFFD84D : 0x55FFFFFF, on && i < lit);
         }
 
         // DD : HH : MM : SS
