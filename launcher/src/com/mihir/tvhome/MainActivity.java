@@ -295,7 +295,21 @@ public class MainActivity extends Activity {
         int screenH = getResources().getDisplayMetrics().heightPixels;
         content.addView(hero, new LinearLayout.LayoutParams(-1, screenH));
 
+        // A soft pool of shade behind the clock and the widgets under it, so they read over bright footage.
+        View shade = new View(this);
+        GradientDrawable pool = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x8C000000, 0x4D000000, 0x00000000});
+        pool.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        pool.setGradientCenter(0.30f, 0.42f);
+        pool.setGradientRadius(dp(400));
+        shade.setBackground(pool);
+        hero.addView(shade, lp(dp(760), dp(440), Gravity.TOP | Gravity.START, 0, 0, 0, 0));
         hero.addView(buildHeader(), lp(-1, -2, Gravity.TOP, dp(48), dp(58), dp(48), 0));
+        // Where the clip behind was filmed, tucked into the corner under the dock.
+        homePlace = text(8, "sans-serif-medium", 0xA6FFFFFF);
+        homePlace.setLetterSpacing(0.25f);
+        homePlace.setSingleLine(true);
+        homePlace.setShadowLayer(dp(8), 0, dp(1), 0xB3000000);
+        hero.addView(homePlace, lp(-2, -2, Gravity.BOTTOM | Gravity.START, dp(50), 0, 0, dp(9)));
 
         LinearLayout bottom = new LinearLayout(this);
         bottom.setOrientation(LinearLayout.VERTICAL);
@@ -305,10 +319,11 @@ public class MainActivity extends Activity {
 
         // Compact, centred dock: fixed-size tiles on a glass shelf that hugs them.
         bottom.setGravity(Gravity.CENTER_HORIZONTAL);
-        title = text(22, "sans-serif-light", Color.WHITE);
-        title.setShadowLayer(dp(18), 0, 0, 0x66000000);
+        title = text(15, "sans-serif", 0xE6FFFFFF);
+        title.setLetterSpacing(0.04f);
+        title.setShadowLayer(dp(12), 0, dp(1), 0x99000000);
         title.setSingleLine(true);
-        bottom.addView(title, llp(-2, -2, 0, 0, 0, dp(10)));
+        bottom.addView(title, llp(-2, -2, 0, 0, 0, dp(6)));
         bottom.addView(buildPeek(), llp(-2, -2, 0, 0, 0, dp(12)));
 
         dockRow = new LinearLayout(this);
@@ -386,9 +401,19 @@ public class MainActivity extends Activity {
         world.setScaleX(WIDGET_SCALE);
         world.setScaleY(WIDGET_SCALE);
         left.addView(world, llp(-2, -2, 0, dp(14), 0, 0));
-        left.addView(buildFactLine(), llp(dp(320), -2, dp(2), dp(12), 0, 0));
+        left.addView(buildFactLine(), llp(dp(360), -2, 0, dp(12), 0, 0));
         long gtaAt = GtaCountdown.unlockAt(this);
-        if (GtaCountdown.relevant(gtaAt)) left.addView(new GtaCountdown(this, gtaAt), llp(dp(360), dp(75), 0, dp(8), 0, 0));
+        View gta = GtaCountdown.relevant(gtaAt) ? new GtaCountdown(this, gtaAt) : null;
+        if (gta != null) left.addView(gta, llp(dp(360), dp(75), 0, dp(8), 0, 0));
+        // One right edge for the column: the fact line and the countdown are as wide as the row of clocks looks.
+        world.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int wide = Math.round((r - l - dp(10)) * WIDGET_SCALE);
+            for (View s : new View[]{factText, gta}) {
+                if (s == null || wide <= 0 || s.getLayoutParams().width == wide) continue;
+                s.getLayoutParams().width = wide;
+                s.post(s::requestLayout);
+            }
+        });
 
         recsStatus = text(11, "sans-serif-medium", 0xFF8FD4FF);
         recsStatus.setMaxLines(4);
@@ -1754,6 +1779,10 @@ public class MainActivity extends Activity {
         Set<String> kinds = new HashSet<>();
         for (java.io.File f : cachedStills()) kinds.add(f.getName().substring(0, f.getName().indexOf('_')));
         for (String[] k : STILL_NAMES) if (kinds.contains(k[0])) left.add(inputRow(k[1], () -> startScreensaver("still:" + k[0])));
+        if (aerialsOn()) for (int i = 0; i < films().length; i++) {
+            int film = i;
+            left.add(inputRow("🛰  " + films()[i][0], () -> startScreensaver("film:" + film)));
+        }
         Set<String> places = new HashSet<>();
         java.io.File[] clips = aerialsOn() ? cachedAerials() : new java.io.File[0];
         Arrays.sort(clips, (a, b) -> String.valueOf(aerialNames.get(a.getName())).compareTo(String.valueOf(aerialNames.get(b.getName()))));
@@ -1798,7 +1827,7 @@ public class MainActivity extends Activity {
         handler.postDelayed(() -> {
             enterAmbient();
             if (!ambient || pin == null) return;
-            if (pin.startsWith("clip:")) {
+            if (pin.startsWith("clip:") || pin.startsWith("film:")) {
                 resumeAerial = null;
                 playAerial();
             } else {
@@ -4781,9 +4810,17 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- aerials (Apple TV screensaver videos)
 
-    // ~240-350 MB per 1080p clip; ten on disk (about 3 GB of the Hisense's 8 GB free) so the same few don't repeat.
+    // ~240-350 MB per 1080p clip. As many stay on disk as fit while leaving the TV 2.5 GB free (6 to 16 clips).
     private static final String TAG = "tvhome";
-    private static final int AERIAL_CACHE_MAX = 10;
+    private static final int AERIAL_CACHE_MIN = 6, AERIAL_CACHE_TOP = 16;
+    private static final long AERIAL_CLIP_BYTES = 330L << 20, AERIAL_KEEP_FREE = 2500L << 20;
+
+    private int aerialCacheMax(java.io.File[] have) {
+        long used = 0;
+        for (java.io.File f : have) used += f.length();
+        long room = getFilesDir().getUsableSpace() + used - AERIAL_KEEP_FREE;
+        return (int) Math.max(AERIAL_CACHE_MIN, Math.min(AERIAL_CACHE_TOP, room / AERIAL_CLIP_BYTES));
+    }
     private boolean aerialHdr;
 
     /** Apple's HDR aerials are Dolby Vision (dvh1), so they need a Dolby Vision panel and decoder. */
@@ -4807,18 +4844,18 @@ public class MainActivity extends Activity {
         aerialNames.clear();
         for (int i = 0; i < aerialUrls.length && i < labels.length; i++) aerialNames.put(fileName(aerialUrls[i]), labels[i]);
     }
-    private static final long AERIAL_ROTATE_MS = 20L * 3600 * 1000;
+    private static final long AERIAL_ROTATE_MS = 3600 * 1000L; // once full, a new clip replaces the oldest this often
     private static final int AERIAL_FADE_MS = 1200;
     private FrameLayout rootView, photos, ui;
     private View veil;
     private android.view.SurfaceView aerialView;
-    private TextView aerialLabel;
+    private TextView aerialLabel, homePlace;
     private android.media.MediaPlayer player;
     private String[] aerialUrls = new String[0];
     private final Map<String, String> aerialNames = new HashMap<>();
     private final java.util.Random rnd = new java.util.Random();
     private boolean surfaceReady, aerialsRunning, aerialShowing;
-    private volatile boolean aerialDownloading;
+    private volatile boolean aerialDownloading, lumaBusy;
     private String lastAerial = "";
     private final Runnable nextAerial = this::playAerial;
     private final Runnable aerialEnding = () -> veil.animate().alpha(1f).setDuration(AERIAL_FADE_MS).start();
@@ -4849,7 +4886,11 @@ public class MainActivity extends Activity {
     private void stopAerials() {
         aerialsRunning = false;
         // Remember where the clip was so coming back (Home, an app, a menu) carries on instead of cutting to a new one.
-        if (player != null && aerialShowing) {
+        if (player != null && filmIndex >= 0) {
+            resumeAerial = "film:" + filmIndex;
+            filmSegLeft = filmSegEndsAt - SystemClock.elapsedRealtime();
+            pausedAt = SystemClock.elapsedRealtime();
+        } else if (player != null && aerialShowing) {
             try {
                 resumeAerial = lastAerial;
                 resumeAt = player.getCurrentPosition();
@@ -4868,6 +4909,9 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(nextAerial);
         handler.removeCallbacks(aerialEnding);
         handler.removeCallbacks(stillStep);
+        handler.removeCallbacks(filmEnd);
+        saveFilmPos();
+        filmIndex = -1;
         hideStills();
         if (player != null) {
             android.media.MediaPlayer p = player;
@@ -4912,22 +4956,37 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(nextAerial);
         handler.removeCallbacks(aerialEnding);
         if (!aerialsRunning || !surfaceReady) return;
+        handler.removeCallbacks(filmEnd);
+        saveFilmPos();
+        filmIndex = -1;
         if (player != null) { android.media.MediaPlayer p = player; player = null; p.release(); }
         java.io.File[] cached = cachedAerials();
         cacheMoreAerials();
+        boolean resuming = resumeAerial != null && SystemClock.elapsedRealtime() - pausedAt < AERIAL_RESUME_WITHIN_MS;
+        String back = resuming ? resumeAerial : null;
+        resumeAerial = null;
+        int filmCount = films().length;
+        if (filmCount > 0) {
+            if (pinnedSaver != null && pinnedSaver.startsWith("film:")) { playFilm(Integer.parseInt(pinnedSaver.substring(5)), 0); return; }
+            if (back != null && back.startsWith("film:")) { playFilm(Integer.parseInt(back.substring(5)), Math.max(60_000L, filmSegLeft)); return; }
+            int every = getResources().getInteger(R.integer.film_every_clips);
+            if (back == null && pinnedSaver == null && every > 0 && (clipsSinceFilm >= every - 1 || cached.length == 0)) {
+                playFilm(prefs().getInt("film_next", 0), getResources().getInteger(R.integer.film_minutes) * 60_000L);
+                return;
+            }
+        }
         if (cached.length == 0) { handler.postDelayed(nextAerial, 15000); return; }
-        java.io.File f = cached[rnd.nextInt(cached.length)];
-        if (cached.length > 1 && f.getName().equals(lastAerial)) f = cached[(java.util.Arrays.asList(cached).indexOf(f) + 1) % cached.length];
+        java.io.File f = null;
+        int startAt = 0;
         if (pinnedSaver != null && pinnedSaver.startsWith("clip:")) {
             java.io.File pick = new java.io.File(aerialDir(), pinnedSaver.substring(5));
             if (pick.exists()) f = pick;
         }
-        int startAt = 0;
-        if (resumeAerial != null && SystemClock.elapsedRealtime() - pausedAt < AERIAL_RESUME_WITHIN_MS) {
-            java.io.File same = new java.io.File(aerialDir(), resumeAerial);
+        if (back != null && !back.startsWith("film:")) {
+            java.io.File same = new java.io.File(aerialDir(), back);
             if (same.exists()) { f = same; startAt = resumeAt; }
         }
-        resumeAerial = null;
+        if (f == null) f = pickAerial(cached);
         int seekTo = startAt;
         String src = f.getPath();
         String name = fileName(src);
@@ -4983,9 +5042,152 @@ public class MainActivity extends Activity {
         if (!ambient && LiquidGlass.backdrop != null) LiquidGlass.backdrop.start();
         hideStills();
         veil.animate().alpha(0f).setDuration(AERIAL_FADE_MS).start();
-        String label = aerialNames.get(name);
+        String label = filmIndex >= 0 ? films()[filmIndex][0] : aerialNames.get(name);
         aerialLabel.setText(label == null ? "" : label.toUpperCase(Locale.ROOT));
+        homePlace.setText(aerialLabel.getText());
         if (ambient) showAerialLabel(AERIAL_FADE_MS);
+    }
+
+    // Below this average brightness (0-255) a clip counts as a night shot.
+    private static final int LUMA_DARK = 75;
+
+    /**
+     * Every clip on the TV plays once before any of them plays again. Within a round, night shots come first
+     * in the evening and bright ones first in the daytime.
+     */
+    private java.io.File pickAerial(java.io.File[] cached) {
+        Set<String> shown = new HashSet<>(Arrays.asList(prefs().getString("aerial_shown", "").split(",")));
+        List<java.io.File> fresh = new ArrayList<>();
+        for (java.io.File f : cached) if (!shown.contains(f.getName())) fresh.add(f);
+        if (fresh.isEmpty()) { // everything has had its turn: a new round, not starting with the clip just shown
+            shown.clear();
+            for (java.io.File f : cached) if (cached.length == 1 || !f.getName().equals(lastAerial)) fresh.add(f);
+        }
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        boolean evening = hour >= 19 || hour < 6, daytime = hour >= 6 && hour < 17;
+        List<java.io.File> fit = new ArrayList<>();
+        for (java.io.File f : fresh) {
+            int luma = prefs().getInt("aerial_luma_" + f.getName(), -1);
+            if (luma >= 0 && (evening ? luma < LUMA_DARK : daytime && luma >= LUMA_DARK)) fit.add(f);
+        }
+        List<java.io.File> pool = fit.isEmpty() ? fresh : fit;
+        java.io.File pick = pool.get(rnd.nextInt(pool.size()));
+        StringBuilder sb = new StringBuilder(pick.getName());
+        for (java.io.File f : cached) if (shown.contains(f.getName())) sb.append(',').append(f.getName());
+        prefs().edit().putString("aerial_shown", sb.toString()).apply();
+        return pick;
+    }
+
+    /** One frame from the middle of a clip, averaged: how bright the clip is. Runs off the main thread. */
+    private void measureLuma(java.io.File f) {
+        int luma = 128;
+        android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+        try {
+            r.setDataSource(f.getPath());
+            long ms = Long.parseLong(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
+            Bitmap b = r.getScaledFrameAtTime(ms * 400, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 64, 36);
+            if (b != null) {
+                int n = b.getWidth() * b.getHeight();
+                int[] px = new int[n];
+                b.getPixels(px, 0, b.getWidth(), 0, 0, b.getWidth(), b.getHeight());
+                long sum = 0;
+                for (int c : px) sum += (Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10;
+                luma = (int) (sum / n);
+                b.recycle();
+            }
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "aerial brightness failed " + f.getName(), e);
+        } finally {
+            try { r.release(); } catch (Exception ignored) { }
+        }
+        android.util.Log.e(TAG, "aerial brightness " + f.getName() + " " + luma);
+        prefs().edit().putInt("aerial_luma_" + f.getName(), luma).apply();
+    }
+
+    // ---------------------------------------------------------------- long films (streamed, nothing kept on the TV)
+
+    // Each: label | link | seconds of opening titles to skip. A film plays in parts, carrying on where it stopped.
+    private static final int FILM_TAIL_MS = 90_000; // closing credits
+    private String[][] filmList;
+    private int filmIndex = -1, clipsSinceFilm, clipsSinceBreak;
+    private long filmSegLeft, filmSegEndsAt;
+    private final Runnable filmEnd = this::filmDone;
+
+    private String[][] films() {
+        if (filmList == null) {
+            String[] raw = getResources().getStringArray(R.array.long_films);
+            filmList = new String[raw.length][];
+            for (int i = 0; i < raw.length; i++) filmList[i] = raw[i].split("\\|");
+        }
+        return filmList;
+    }
+
+    private void saveFilmPos() {
+        if (filmIndex < 0 || player == null) return;
+        try {
+            prefs().edit().putInt("film_pos_" + filmIndex, player.getCurrentPosition()).apply();
+        } catch (IllegalStateException ignored) { }
+    }
+
+    /** Streams film i from where it last stopped, for runMs (0 = to the end). */
+    private void playFilm(int index, long runMs) {
+        int i = Math.floorMod(index, films().length);
+        String[] film = films()[i];
+        int skip = film.length > 2 ? Integer.parseInt(film[2].trim()) * 1000 : 0;
+        int at = prefs().getInt("film_pos_" + i, 0);
+        filmIndex = i;
+        clipsSinceFilm = 0;
+        lastAerial = "";
+        android.media.MediaPlayer mp = new android.media.MediaPlayer();
+        player = mp;
+        Runnable failed = () -> {
+            android.util.Log.e(TAG, "film failed " + film[1]);
+            filmIndex = -1;
+            releasePlayer();
+            handler.postDelayed(nextAerial, 2000);
+        };
+        try {
+            mp.setDataSource(film[1].trim());
+            mp.setDisplay(aerialView.getHolder());
+            mp.setVolume(0f, 0f);
+            mp.setOnPreparedListener(p -> {
+                if (p != player) return;
+                p.setVideoScalingMode(android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+                int end = p.getDuration() - FILM_TAIL_MS;
+                int from = at < skip || at > end - 120_000 ? skip : at;
+                p.seekTo(from);
+                p.start();
+                long run = runMs > 0 ? Math.min(runMs, end - from) : end - from;
+                filmSegEndsAt = SystemClock.elapsedRealtime() + run;
+                handler.postDelayed(aerialEnding, Math.max(0, run - AERIAL_FADE_MS - 200));
+                handler.postDelayed(filmEnd, run);
+            });
+            mp.setOnInfoListener((p, what, extra) -> {
+                if (p == player && what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) onAerialShowing("film");
+                return false;
+            });
+            mp.setOnCompletionListener(p -> { if (p == player) filmDone(); });
+            mp.setOnErrorListener((p, what, extra) -> {
+                if (p == player) failed.run();
+                return true;
+            });
+            mp.prepareAsync();
+        } catch (Exception e) {
+            failed.run();
+        }
+    }
+
+    /** This part of the film is over (the screen has faded to black): back to the clips, the other film next time. */
+    private void filmDone() {
+        handler.removeCallbacks(filmEnd);
+        saveFilmPos();
+        int i = filmIndex;
+        filmIndex = -1;
+        if (i < 0) return;
+        int next = (i + 1) % films().length;
+        prefs().edit().putInt("film_next", next).apply();
+        if (pinnedSaver != null && pinnedSaver.startsWith("film:")) pinnedSaver = "film:" + next;
+        playAerial();
     }
 
     // ---------------------------------------------------------------- stills between aerials
@@ -5130,7 +5332,12 @@ public class MainActivity extends Activity {
         java.io.File[] have = cachedStills();
         cacheMoreStills();
         int per = getResources().getInteger(R.integer.stills_per_break);
+        clipsSinceFilm++;
         if (have.length == 0 || per <= 0 || pinnedSaver != null) { playAerial(); return; } // a picked clip repeats
+        // Clips run back to back; the pictures come in only after every few of them.
+        if (++clipsSinceBreak < getResources().getInteger(R.integer.clips_per_break)) { playAerial(); return; }
+        clipsSinceBreak = 0;
+        homePlace.setText("");
         if (player != null) { android.media.MediaPlayer p = player; player = null; p.release(); }
         aerialShowing = false;
         if (LiquidGlass.backdrop != null) LiquidGlass.backdrop.stop();
@@ -5234,7 +5441,7 @@ public class MainActivity extends Activity {
                 aerialLabel.animate().alpha(0f).setStartDelay(9000).setDuration(1200).start()).start();
     }
 
-    /** Downloads one clip at a time in the background; once full, swaps the oldest for a new one daily. */
+    /** Downloads one clip at a time in the background; once full, swaps the oldest for a new one every hour of use. */
     private void cacheMoreAerials() {
         if (aerialDownloading) return;
         java.io.File dir = aerialDir();
@@ -5242,7 +5449,16 @@ public class MainActivity extends Activity {
         java.io.File[] parts = dir.listFiles((d, n) -> n.endsWith(".part"));
         if (parts != null) for (java.io.File f : parts) f.delete();
         java.io.File[] have = cachedAerials();
-        if (have.length >= AERIAL_CACHE_MAX) {
+        for (java.io.File f : have) {
+            if (lumaBusy || prefs().contains("aerial_luma_" + f.getName())) continue;
+            lumaBusy = true;
+            new Thread(() -> {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                measureLuma(f);
+                lumaBusy = false;
+            }).start();
+        }
+        if (have.length >= aerialCacheMax(have)) {
             if (System.currentTimeMillis() - prefs().getLong("aerial_rotated", 0) < AERIAL_ROTATE_MS) return;
             java.io.File oldest = null;
             for (java.io.File f : have) if (!f.getName().equals(lastAerial) && (oldest == null || f.lastModified() < oldest.lastModified())) oldest = f;
@@ -5251,10 +5467,16 @@ public class MainActivity extends Activity {
         }
         Set<String> names = new HashSet<>();
         for (java.io.File f : have) names.add(f.getName());
-        List<String> todo = new ArrayList<>();
-        for (String u : aerialUrls) if (!names.contains(fileName(u))) todo.add(u);
+        // Clips this TV has never had come first, so the whole list goes by before any comes back.
+        Set<String> seen = new HashSet<>(Arrays.asList(prefs().getString("aerial_seen", "").split(",")));
+        seen.addAll(names);
+        List<String> todo = new ArrayList<>(), old = new ArrayList<>();
+        for (String u : aerialUrls) if (!names.contains(fileName(u))) (seen.contains(fileName(u)) ? old : todo).add(u);
+        if (todo.isEmpty()) { todo = old; seen.retainAll(names); }
         if (todo.isEmpty()) return;
         String url = todo.get(rnd.nextInt(todo.size()));
+        seen.add(fileName(url));
+        prefs().edit().putString("aerial_seen", android.text.TextUtils.join(",", seen)).apply();
         aerialDownloading = true;
         android.util.Log.e(TAG, "aerial download start " + url + " (have " + have.length + ")");
         new Thread(() -> {
@@ -5266,8 +5488,11 @@ public class MainActivity extends Activity {
                 int n;
                 while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
                 o.close();
-                if (part.renameTo(new java.io.File(dir, fileName(url))))
+                java.io.File done = new java.io.File(dir, fileName(url));
+                if (part.renameTo(done)) {
                     prefs().edit().putLong("aerial_rotated", System.currentTimeMillis()).apply();
+                    measureLuma(done);
+                }
                 android.util.Log.e(TAG, "aerial download done " + fileName(url) + " " + part.length());
             } catch (Exception e) {
                 android.util.Log.e(TAG, "aerial download failed " + url, e);

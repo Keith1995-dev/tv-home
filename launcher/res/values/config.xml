@@ -97,8 +97,21 @@
         <item>space</item>
     </string-array>
     <!-- Stills shown after each clip (0 = aerials only), and seconds per still. -->
-    <integer name="stills_per_break">3</integer>
+    <integer name="stills_per_break">2</integer>
     <integer name="still_seconds">40</integer>
+    <!-- Clips play back to back; the stills come in after every this many clips. -->
+    <integer name="clips_per_break">3</integer>
+
+    <!-- Long films, streamed (nothing is kept on the TV): label | link | seconds of opening titles to skip.
+         These are NASA's own 50-minute films of Earth from the Space Station (public domain). A film plays in
+         parts in the usual mix, carrying on where it stopped; pick one from the Screensaver menu to watch it through. -->
+    <string-array name="long_films">
+        <item>Earth from orbit · NASA|https://images-assets.nasa.gov/video/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4~large.mp4|45</item>
+        <item>Earth from orbit II · NASA|https://images-assets.nasa.gov/video/jsc2022m000172_Earth_in_4K_Expedition_65_Edition/jsc2022m000172_Earth_in_4K_Expedition_65_Edition~large.mp4|45</item>
+    </string-array>
+    <!-- In the usual mix a part of a film comes up as every this-many-th clip (0 = never), for this many minutes. -->
+    <integer name="film_every_clips">5</integer>
+    <integer name="film_minutes">12</integer>
 
     <!-- The GTA VI countdown on Home: when it unlocks (an ISO instant; Thu 19 Nov 00:00 in India). Empty = off. -->
     <string name="gta6_unlock" translatable="false">2026-11-18T18:30:00Z</string>

@@ -100,6 +100,7 @@ final class GtaCountdown extends View {
     private final Typeface label = Typeface.create("sans-serif-medium", Typeface.NORMAL);
     private final float[][] confetti = new float[46][5], stars = new float[60][3], towers = new float[26][4];
     private Shader sky, sun, sea, rim;
+    private float rimW;
     private float shadedNight = -1, shadedH;
     private boolean running;
 
@@ -137,8 +138,8 @@ final class GtaCountdown extends View {
     protected void onDraw(Canvas c) {
         long now = System.currentTimeMillis(), left = unlock - now;
         float t = (now % 600_000L) / 1000f;
-        // Drawn on a 500 x 104 dp design canvas, scaled to whatever size the card is given.
-        float k = getWidth() / (W * d), w = W * d, h = H * d, rad = 18 * d;
+        // Drawn on a design canvas 104 dp tall, scaled to the card's height; a wider card just gets more beach.
+        float k = getHeight() / (H * d), w = getWidth() / k, h = H * d, rad = 18 * d;
         c.save();
         c.scale(k, k);
         c.save();
@@ -152,10 +153,11 @@ final class GtaCountdown extends View {
         c.restore();
 
         // A thin neon rim.
-        if (rim == null) rim = new LinearGradient(0, 0, w, h, 0xCCFF4FB0, 0xCC34E1FF, Shader.TileMode.CLAMP);
+        if (rim == null || rimW != w) rim = new LinearGradient(0, 0, w, h, 0xCCFF4FB0, 0xCC34E1FF, Shader.TileMode.CLAMP);
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(1.5f * d);
         p.setColor(Color.WHITE); // a shader still takes the paint's alpha
+        rimW = w;
         p.setShader(rim);
         r.set(d, d, w - d, h - d);
         c.drawRoundRect(r, rad, rad, p);
