@@ -402,17 +402,12 @@ public class MainActivity extends Activity {
         world.setScaleY(WIDGET_SCALE);
         left.addView(world, llp(-2, -2, 0, dp(14), 0, 0));
         left.addView(buildFactLine(), llp(dp(360), -2, 0, dp(12), 0, 0));
-        long gtaAt = GtaCountdown.unlockAt(this);
-        View gta = GtaCountdown.relevant(gtaAt) ? new GtaCountdown(this, gtaAt) : null;
-        if (gta != null) left.addView(gta, llp(dp(360), dp(75), 0, dp(8), 0, 0));
-        // One right edge for the column: the fact line and the countdown are as wide as the row of clocks looks.
+        // One right edge for the column: the fact line is as wide as the row of clocks looks.
         world.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int wide = Math.round((r - l - dp(10)) * WIDGET_SCALE);
-            for (View s : new View[]{factText, gta}) {
-                if (s == null || wide <= 0 || s.getLayoutParams().width == wide) continue;
-                s.getLayoutParams().width = wide;
-                s.post(s::requestLayout);
-            }
+            if (wide <= 0 || factText.getLayoutParams().width == wide) return;
+            factText.getLayoutParams().width = wide;
+            factText.post(factText::requestLayout);
         });
 
         recsStatus = text(11, "sans-serif-medium", 0xFF8FD4FF);
@@ -4041,8 +4036,6 @@ public class MainActivity extends Activity {
         card.addView(day, llp(-2, -2, 0, dp(2), 0, dp(14)));
 
         List<String[]> lines = new ArrayList<>();
-        String gta = GtaCountdown.todayLine(this);
-        if (gta != null) lines.add(new String[]{"🌴", gta});
         if (wxTemp != null && wxTemp.getText().length() > 0) {
             lines.add(new String[]{wxIcon.getText().toString(), wxTemp.getText() + " " + wxCond.getText() + "  ·  " + wxRange.getText()
                     + "\n" + tennisTitle.getText().toString().toLowerCase(Locale.getDefault()) + ": " + tennisVerdict.getText()});

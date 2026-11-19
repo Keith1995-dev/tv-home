@@ -113,7 +113,4 @@
     <integer name="film_every_clips">5</integer>
     <integer name="film_minutes">12</integer>
 
-    <!-- The GTA VI countdown on Home: when it unlocks (an ISO instant; Thu 19 Nov 00:00 in India). Empty = off. -->
-    <string name="gta6_unlock" translatable="false">2026-11-18T18:30:00Z</string>
-
 </resources>

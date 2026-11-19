@@ -91,7 +91,6 @@ public class OverlayService extends Service {
         android.content.IntentFilter sf = new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
         sf.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(screenOn, sf);
-        gtaCheck();
     }
 
     @Override
@@ -195,7 +194,6 @@ public class OverlayService extends Service {
     private final Runnable feedPoll = new Runnable() {
         @Override public void run() {
             checkFeed();
-            maybeGtaBanner();
             handler.postDelayed(this, FEED_EVERY_MS);
         }
     };
@@ -351,37 +349,6 @@ public class OverlayService extends Service {
                 }).start()).start();
     }
 
-    // ---------------------------------------------------------------- GTA VI countdown
-
-    // A banner once a day over whatever is on, and at zero the room goes Party.
-    private final Runnable gtaTick = this::gtaCheck;
-
-    private void maybeGtaBanner() {
-        long at = GtaCountdown.unlockAt(this), now = System.currentTimeMillis();
-        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now);
-        // Not on Home, which has the countdown card; it waits until you're watching something.
-        if (at == 0 || now > at - 3600_000L || homeShowing || today.equals(prefs.getString("gta_banner_day", ""))
-                || !canDraw() || !getSystemService(android.os.PowerManager.class).isInteractive()) return;
-        prefs.edit().putString("gta_banner_day", today).apply();
-        showBanner("🌴", GtaCountdown.left(at - now) + " to GTA VI", GtaCountdown.line(), BANNER_MS, 0xFFFF6FB5);
-    }
-
-    /** Runs when the service starts and when the screen comes on, then again as the moment gets close. */
-    private void gtaCheck() {
-        handler.removeCallbacks(gtaTick);
-        long at = GtaCountdown.unlockAt(this), now = System.currentTimeMillis();
-        if (at == 0 || now >= at + 60_000 || at == prefs.getLong("gta_party_for", 0)) return;
-        if (now < at) { // the handler's clock stops while the TV sleeps, so look again every few minutes
-            handler.postDelayed(gtaTick, Math.min(at - now, 5 * 60_000L));
-            return;
-        }
-        if (!getSystemService(android.os.PowerManager.class).isInteractive()) return;
-        prefs.edit().putLong("gta_party_for", at).apply();
-        if (lights == null) lights = new RoomLights(this);
-        lights.set("party");
-        currentMood = lights.mood();
-    }
-
     // ---------------------------------------------------------------- morning briefing on wake
 
     // When the TV wakes into another app before noon, the day's briefing comes as a banner instead. If it wakes
@@ -399,7 +366,6 @@ public class OverlayService extends Service {
             }
             handler.removeCallbacks(wakeBriefing);
             handler.postDelayed(wakeBriefing, 4000); // give Home a moment to come back first
-            gtaCheck();
             // Alerts only show while the screen is on, so catch up on anything that came in while it was off.
             handler.removeCallbacks(feedPoll);
             handler.postDelayed(feedPoll, 30_000);
@@ -414,8 +380,6 @@ public class OverlayService extends Service {
         String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now.getTime());
         if (homeShowing || h < 4 || h >= 12 || today.equals(prefs.getString("briefing_day", "")) || !canDraw()) return;
         java.util.List<String> lines = new java.util.ArrayList<>();
-        String gta = GtaCountdown.todayLine(this);
-        if (gta != null) lines.add("🌴  " + gta);
         String wx = weatherLine();
         if (!wx.isEmpty()) lines.add("🌤  " + wx);
         try {
