@@ -1,13 +1,14 @@
 package com.mihir.tvhome;
 
 import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -40,9 +41,11 @@ final class LiquidGlass extends Drawable {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path clip = new Path();
-    private final RectF box = new RectF();
-    private final Rect src = new Rect();
+    private final RectF box = new RectF(), src = new RectF();
+    private final Matrix lens = new Matrix();
+    // One shader per backdrop buffer (three for video, one for the still photo), so nothing is allocated per frame.
+    private final Bitmap[] shaderFor = new Bitmap[4];
+    private final BitmapShader[] shaders = new BitmapShader[4];
     private final int[] loc = new int[2];
 
     LiquidGlass(View host, float radius) {
@@ -71,8 +74,6 @@ final class LiquidGlass extends Drawable {
 
     @Override protected void onBoundsChange(Rect b) {
         box.set(b);
-        clip.reset();
-        clip.addRoundRect(box, radius, radius, Path.Direction.CW);
         sheen.setShader(new LinearGradient(0, b.top, 0, b.top + b.height() * 0.55f,
                 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         rim.setShader(new LinearGradient(b.left, b.top, b.right, b.bottom,
@@ -81,12 +82,12 @@ final class LiquidGlass extends Drawable {
     }
 
     @Override public void draw(Canvas c) {
+        // Every layer is drawn as the same rounded rectangle instead of clipping to a path: clipPath makes the
+        // GPU build a mask for each panel on every frame, a rounded rectangle it draws directly.
         Bitmap frame = backdrop == null ? null : backdrop.frame;
-        c.save();
-        c.clipPath(clip);
         if (lit) {
             fill.setColor(0xF5F4F4F8);
-            c.drawRect(box, fill);
+            c.drawRoundRect(box, radius, radius, fill);
         } else {
             if (frame != null) {
                 host.getLocationOnScreen(loc);
@@ -95,21 +96,39 @@ final class LiquidGlass extends Drawable {
                 // Sample a slightly smaller area than the panel covers: a gentle magnification, like a lens.
                 float inset = 0.04f;
                 float w = box.width(), h = box.height();
-                src.set(Math.round((loc[0] + w * inset) * sx), Math.round((loc[1] + h * inset) * sy),
-                        Math.round((loc[0] + w * (1 - inset)) * sx), Math.round((loc[1] + h * (1 - inset)) * sy));
-                c.drawBitmap(frame, src, box, img);
+                src.set((loc[0] + w * inset) * sx, (loc[1] + h * inset) * sy,
+                        (loc[0] + w * (1 - inset)) * sx, (loc[1] + h * (1 - inset)) * sy);
+                lens.setRectToRect(src, box, Matrix.ScaleToFit.FILL);
+                BitmapShader sh = shader(frame);
+                sh.setLocalMatrix(lens);
+                img.setShader(sh);
+                c.drawRoundRect(box, radius, radius, img);
                 fill.setColor(0x14FFFFFF);
             } else {
                 fill.setColor(0x40FFFFFF); // nothing to sample yet: plain frosted glass
             }
-            c.drawRect(box, fill);
-            c.drawRect(box, sheen);
+            c.drawRoundRect(box, radius, radius, fill);
+            c.drawRoundRect(box, radius, radius, sheen);
         }
-        c.restore();
         float half = rim.getStrokeWidth() / 2f;
         box.inset(half, half);
         c.drawRoundRect(box, radius - half, radius - half, rim);
         box.inset(-half, -half);
+    }
+
+    private BitmapShader shader(Bitmap b) {
+        int free = -1;
+        for (int i = 0; i < shaders.length; i++) {
+            if (shaderFor[i] == b) return shaders[i];
+            if (free < 0 && shaderFor[i] == null) free = i;
+        }
+        int i = free >= 0 ? free : 0;
+        if (free < 0) { // a new set of buffers (e.g. the still photo): start the cache over
+            java.util.Arrays.fill(shaderFor, null);
+        }
+        shaderFor[i] = b;
+        shaders[i] = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        return shaders[i];
     }
 
     @Override public void setAlpha(int a) { }
@@ -131,7 +150,8 @@ final class LiquidGlass extends Drawable {
         private final Bitmap grab = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         // Three output buffers so the one on screen (and the one before it) is never rewritten mid-draw.
         private final Bitmap[] out = new Bitmap[3];
-        private final int[] px = new int[W * H], tmp = new int[W * H];
+        private final int[] px = new int[W * H], tmp = new int[W * H], shown = new int[W * H];
+        private long shownAt;
         private int next, failures;
         private boolean running, busy;
 
@@ -205,6 +225,22 @@ final class LiquidGlass extends Drawable {
                 box(px, tmp, W, H, R);
                 box(tmp, px, H, W, R);
             }
+            // Aerials drift slowly: between two samples the blurred frame typically moves by a third of one
+            // brightness step. Only hand the panels a new frame once it has changed visibly since the one they
+            // show (half a step on average), or every half second; this skips most redraws with no visible change.
+            long diff = 0;
+            for (int i = 0; i < px.length; i++) {
+                int p = px[i], q = shown[i];
+                diff += Math.abs(((p >> 16) & 0xFF) - ((q >> 16) & 0xFF)) + Math.abs(((p >> 8) & 0xFF) - ((q >> 8) & 0xFF))
+                        + Math.abs((p & 0xFF) - (q & 0xFF));
+            }
+            long now = android.os.SystemClock.uptimeMillis();
+            if (diff * 2 < 3L * px.length && now - shownAt < 500 && frame != still && frame != null) {
+                main.post(() -> busy = false);
+                return;
+            }
+            System.arraycopy(px, 0, shown, 0, px.length);
+            shownAt = now;
             Bitmap b = out[next];
             next = (next + 1) % out.length;
             b.setPixels(px, 0, W, 0, 0, W, H);
